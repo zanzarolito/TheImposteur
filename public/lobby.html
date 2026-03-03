@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lobby - Loup-Garou</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🐺 Salle d'attente</h1>
+      <div style="text-align: center; margin-top: 15px;">
+        <p style="color: #aaa; margin-bottom: 5px;">Code:</p>
+        <p style="font-size: 2rem; font-weight: bold; letter-spacing: 2px; margin-bottom: 10px;">
+          <span id="room-code"></span>
+        </p>
+        <button id="copy-btn" class="btn btn-small">Copier le code</button>
+      </div>
+    </header>
+    
+    <main>
+      <div class="card">
+        <h2>Joueurs (<span id="player-count">0</span>)</h2>
+        <ul id="player-list" class="player-list"></ul>
+      </div>
+      
+      <div id="mj-panel" class="card" style="display: none;">
+        <h2>Configuration MJ</h2>
+        <div style="margin-bottom: 15px;">
+          <label>Loups: <input type="number" id="loup" min="1" max="10" value="2"></label>
+          <label>Villageois: <input type="number" id="villageois" min="0" max="15" value="2"></label>
+          <label>Voyante: <input type="number" id="voyante" min="0" max="1" value="1"></label>
+          <label>Sorcière: <input type="number" id="sorciere" min="0" max="1" value="1"></label>
+        </div>
+        <p id="status"></p>
+        <button id="test-btn" class="btn btn-secondary" style="margin-bottom: 10px;">Ajouter 6 bots</button>
+        <button id="start-btn" class="btn btn-primary" disabled>Lancer</button>
+      </div>
+      
+      <div id="wait-panel" class="card">
+        <p>En attente du MJ...</p>
+      </div>
+    </main>
+    
+    <div id="notification" class="notification"></div>
+  </div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/session.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const roomId = params.get('room');
+    const isMJ = params.get('mj') === 'true';
+    const socket = io();
+
+    let players = [];
+    let composition = {};
+
+    document.getElementById('room-code').textContent = roomId;
+
+    if (isMJ) {
+      document.getElementById('mj-panel').style.display = 'block';
+      document.getElementById('wait-panel').style.display = 'none';
+    }
+
+    document.getElementById('copy-btn').addEventListener('click', () => {
+      navigator.clipboard.writeText(roomId);
+      showNotif('Code copié !', 'success');
+    });
+
+    if (isMJ) {
+      ['loup', 'villageois', 'voyante', 'sorciere'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateComp);
+      });
+
+      function updateComp() {
+        composition = {};
+        ['loup', 'villageois', 'voyante', 'sorciere'].forEach(id => {
+          const v = parseInt(document.getElementById(id).value) || 0;
+          if (v > 0) composition[id] = v;
+        });
+
+        const total = Object.values(composition).reduce((a, b) => a + b, 0);
+        const status = document.getElementById('status');
+        const btn = document.getElementById('start-btn');
+
+        if (total === players.length && players.length >= 6) {
+          status.textContent = `✓ ${total} rôles`;
+          status.style.color = '#4caf50';
+          btn.disabled = false;
+        } else {
+          status.textContent = `${total} rôles pour ${players.length} joueurs`;
+          status.style.color = '#f44336';
+          btn.disabled = true;
+        }
+
+        socket.emit('setComposition', { roomId, composition });
+      }
+
+      document.getElementById('start-btn').addEventListener('click', () => {
+        socket.emit('startGame', { roomId });
+      });
+
+      document.getElementById('test-btn').addEventListener('click', () => {
+        socket.emit('addTestPlayers', { roomId });
+      });
+    }
+
+    socket.on('playerJoined', ({ players: p }) => {
+      players = p;
+      updateList();
+      if (isMJ) updateComp();
+    });
+
+    socket.on('testPlayersAdded', ({ count }) => {
+      showNotif(`${count} bots ajoutés`, 'success');
+    });
+
+    socket.on('gameStarted', () => {
+      window.location.href = `game.html?room=${roomId}`;
+    });
+
+    socket.on('error', ({ message }) => {
+      showNotif(message, 'error');
+    });
+
+    function updateList() {
+      const list = document.getElementById('player-list');
+      list.innerHTML = '';
+      players.forEach(p => {
+        const li = document.createElement('li');
+        li.textContent = p.name;
+        if (p.online) li.classList.add('online');
+        list.appendChild(li);
+      });
+      document.getElementById('player-count').textContent = players.length;
+    }
+
+    function showNotif(msg, type = 'info') {
+      const n = document.getElementById('notification');
+      n.textContent = msg;
+      n.className = `notification ${type} show`;
+      setTimeout(() => n.classList.remove('show'), 3000);
+    }
+  </script>
+</body>
+</html>

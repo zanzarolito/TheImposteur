@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Partie en cours - Loup-Garou</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🐺 Loup-Garou</h1>
+      <div id="game-status" class="game-phase">
+        <h2 id="phase-title">Phase</h2>
+        <p id="phase-description"></p>
+      </div>
+    </header>
+    
+    <main>
+      <div id="role-reveal" class="card" style="display: none;">
+        <div class="role-card">
+          <h2 id="role-name"></h2>
+          <p id="role-description"></p>
+        </div>
+        <button id="hide-role-btn" class="btn btn-primary">J'ai vu mon rôle</button>
+      </div>
+      
+      <div id="night-action" class="card" style="display: none;">
+        <h2 id="action-title">Votre action</h2>
+        <p id="action-description"></p>
+        <div id="player-selection" class="player-grid"></div>
+        <button id="confirm-action-btn" class="btn btn-primary" disabled>Confirmer</button>
+      </div>
+      
+      <div id="day-vote" class="card" style="display: none;">
+        <h2>Vote du village</h2>
+        <p>Choisissez qui éliminer</p>
+        <div id="vote-selection" class="player-grid"></div>
+        <p id="vote-count">Votes: <span id="vote-current">0</span>/<span id="vote-total">0</span></p>
+      </div>
+      
+      <div id="waiting-screen" class="card">
+        <p style="text-align: center;">En attente...</p>
+      </div>
+      
+      <div id="death-announcement" class="card" style="display: none;">
+        <h2>Résultats</h2>
+        <div id="death-list"></div>
+      </div>
+    </main>
+    
+    <div id="notification" class="notification"></div>
+  </div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/session.js"></script>
+  <script src="js/socket-client.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

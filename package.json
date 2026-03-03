@@ -1,0 +1,19 @@
+{
+  "name": "loupgarou-online",
+  "version": "1.0.0",
+  "description": "Loup-Garou en ligne avec persistance multijoueur",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["loupgarou", "werewolf", "multiplayer", "websocket"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

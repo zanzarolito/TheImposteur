@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test - Rooms</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🧪 Page de Test</h1>
+    </header>
+    
+    <main>
+      <div class="card">
+        <h2>Rooms Actives</h2>
+        <button id="refresh-btn" class="btn btn-primary">Rafraîchir</button>
+        <pre id="rooms-list" style="background: #0f0f0f; padding: 15px; border-radius: 8px; overflow-x: auto; margin-top: 15px;"></pre>
+      </div>
+      
+      <div class="card">
+        <h2>Test de Connexion</h2>
+        <p>Socket ID: <strong id="socket-id">-</strong></p>
+        <p>Status: <strong id="socket-status">-</strong></p>
+      </div>
+    </main>
+  </div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    
+    socket.on('connect', () => {
+      document.getElementById('socket-id').textContent = socket.id;
+      document.getElementById('socket-status').textContent = 'Connecté ✓';
+      document.getElementById('socket-status').style.color = '#4caf50';
+    });
+    
+    socket.on('disconnect', () => {
+      document.getElementById('socket-status').textContent = 'Déconnecté ✗';
+      document.getElementById('socket-status').style.color = '#f44336';
+    });
+    
+    async function loadRooms() {
+      try {
+        const response = await fetch('/api/rooms');
+        const data = await response.json();
+        document.getElementById('rooms-list').textContent = JSON.stringify(data, null, 2);
+      } catch (error) {
+        document.getElementById('rooms-list').textContent = 'Erreur: ' + error.message;
+      }
+    }
+    
+    document.getElementById('refresh-btn').addEventListener('click', loadRooms);
+    
+    // Charger au démarrage
+    loadRooms();
+  </script>
+</body>
+</html>

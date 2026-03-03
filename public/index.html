@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loup-Garou en Ligne</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🐺 Loup-Garou en Ligne</h1>
+      <p class="subtitle">Jouez au Loup-Garou avec vos amis</p>
+      <div id="connection-status" style="text-align: center; margin-top: 10px;">
+        <span style="color: #ff9800;">⏳ Connexion...</span>
+      </div>
+    </header>
+    
+    <main>
+      <div class="card">
+        <input type="text" id="player-name" placeholder="Votre pseudo" maxlength="20">
+        <button id="create-room-btn" class="btn btn-primary">Créer une partie</button>
+        
+        <div class="divider">ou</div>
+        
+        <input type="text" id="room-code" placeholder="Code de la room" maxlength="8">
+        <button id="join-room-btn" class="btn btn-secondary">Rejoindre</button>
+      </div>
+    </main>
+    
+    <div id="notification" class="notification"></div>
+  </div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/session.js"></script>
+  <script>
+    const socket = io();
+    let ready = false;
+
+    socket.on('connect', () => {
+      ready = true;
+      document.getElementById('connection-status').innerHTML = '<span style="color: #4caf50;">✓ Connecté</span>';
+    });
+
+    socket.on('disconnect', () => {
+      ready = false;
+      document.getElementById('connection-status').innerHTML = '<span style="color: #f44336;">✗ Déconnecté</span>';
+    });
+
+    document.getElementById('create-room-btn').addEventListener('click', () => {
+      if (!ready) return showNotif('Connexion en cours...', 'warning');
+      const name = document.getElementById('player-name').value.trim();
+      if (!name) return showNotif('Entrez un pseudo', 'error');
+      
+      const token = getOrCreateSessionToken();
+      socket.emit('createRoom', { playerName: name, sessionToken: token });
+    });
+
+    document.getElementById('join-room-btn').addEventListener('click', () => {
+      if (!ready) return showNotif('Connexion en cours...', 'warning');
+      const name = document.getElementById('player-name').value.trim();
+      const code = document.getElementById('room-code').value.trim().toUpperCase();
+      
+      if (!name) return showNotif('Entrez un pseudo', 'error');
+      if (code.length !== 8) return showNotif('Code invalide (8 caractères)', 'error');
+      
+      const token = getOrCreateSessionToken();
+      socket.emit('joinRoom', { roomId: code, playerName: name, sessionToken: token });
+    });
+
+    socket.on('roomCreated', ({ roomId }) => {
+      saveRoomContext(roomId, 1);
+      window.location.href = `lobby.html?room=${roomId}&mj=true`;
+    });
+
+    socket.on('roomJoined', ({ roomId }) => {
+      saveRoomContext(roomId, 1);
+      window.location.href = `lobby.html?room=${roomId}`;
+    });
+
+    socket.on('error', ({ message }) => {
+      showNotif(message, 'error');
+    });
+
+    function showNotif(msg, type = 'info') {
+      const n = document.getElementById('notification');
+      n.textContent = msg;
+      n.className = `notification ${type} show`;
+      setTimeout(() => n.classList.remove('show'), 3000);
+    }
+  </script>
+</body>
+</html>

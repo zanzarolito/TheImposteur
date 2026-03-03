@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Debug</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #eee; }
+    button { padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer; }
+    #logs { background: #0f0f0f; padding: 15px; border-radius: 8px; margin-top: 20px; max-height: 400px; overflow-y: auto; }
+    .log { margin: 5px 0; padding: 5px; border-left: 3px solid #4caf50; }
+    .log.error { border-left-color: #f44336; }
+  </style>
+</head>
+<body>
+  <h1>🐛 Debug Socket.IO</h1>
+  
+  <div>
+    <p>Socket ID: <strong id="socket-id">-</strong></p>
+    <p>Status: <strong id="status">-</strong></p>
+  </div>
+  
+  <div>
+    <input type="text" id="player-name" placeholder="Pseudo" value="TestUser">
+    <button onclick="testCreateRoom()">Test createRoom</button>
+    <button onclick="testJoinRoom()">Test joinRoom</button>
+    <button onclick="clearLogs()">Clear Logs</button>
+  </div>
+  
+  <div id="logs"></div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/session.js"></script>
+  <script>
+    const socket = io();
+    const logsDiv = document.getElementById('logs');
+    
+    function addLog(message, isError = false) {
+      const log = document.createElement('div');
+      log.className = 'log' + (isError ? ' error' : '');
+      log.textContent = new Date().toLocaleTimeString() + ' - ' + message;
+      logsDiv.appendChild(log);
+      logsDiv.scrollTop = logsDiv.scrollHeight;
+      console.log(message);
+    }
+    
+    function clearLogs() {
+      logsDiv.innerHTML = '';
+    }
+    
+    socket.on('connect', () => {
+      document.getElementById('socket-id').textContent = socket.id;
+      document.getElementById('status').textContent = 'Connecté ✓';
+      document.getElementById('status').style.color = '#4caf50';
+      addLog('Socket connecté: ' + socket.id);
+    });
+    
+    socket.on('disconnect', () => {
+      document.getElementById('status').textContent = 'Déconnecté ✗';
+      document.getElementById('status').style.color = '#f44336';
+      addLog('Socket déconnecté', true);
+    });
+    
+    // Écouter tous les événements
+    socket.onAny((eventName, ...args) => {
+      addLog('Événement reçu: ' + eventName + ' - ' + JSON.stringify(args));
+    });
+    
+    function testCreateRoom() {
+      const playerName = document.getElementById('player-name').value;
+      const token = getOrCreateSessionToken();
+      
+      addLog('Envoi createRoom: ' + JSON.stringify({ playerName, sessionToken: token }));
+      
+      socket.emit('createRoom', { playerName, sessionToken: token });
+    }
+    
+    function testJoinRoom() {
+      const playerName = document.getElementById('player-name').value;
+      const roomId = prompt('Code de la room (8 caractères):');
+      const token = getOrCreateSessionToken();
+      
+      if (roomId) {
+        addLog('Envoi joinRoom: ' + JSON.stringify({ roomId, playerName, sessionToken: token }));
+        socket.emit('joinRoom', { roomId, playerName, sessionToken: token });
+      }
+    }
+    
+    socket.on('roomCreated', (data) => {
+      addLog('✓ Room créée: ' + JSON.stringify(data));
+      alert('Room créée: ' + data.roomId);
+    });
+    
+    socket.on('roomJoined', (data) => {
+      addLog('✓ Room rejointe: ' + JSON.stringify(data));
+      alert('Room rejointe: ' + data.roomId);
+    });
+    
+    socket.on('error', (data) => {
+      addLog('✗ Erreur: ' + data.message, true);
+      alert('Erreur: ' + data.message);
+    });
+  </script>
+</body>
+</html>

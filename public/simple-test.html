@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Test Simple</title>
+</head>
+<body>
+  <h1>Test Socket.IO</h1>
+  <div id="status">Chargement...</div>
+  <div id="socket-id"></div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    document.getElementById('status').textContent = 'Socket.IO chargé !';
+    
+    const socket = io();
+    
+    socket.on('connect', () => {
+      document.getElementById('socket-id').textContent = 'Connecté ! Socket ID: ' + socket.id;
+      console.log('Connecté avec ID:', socket.id);
+    });
+    
+    socket.on('disconnect', () => {
+      document.getElementById('socket-id').textContent = 'Déconnecté';
+    });
+    
+    socket.on('connect_error', (error) => {
+      document.getElementById('socket-id').textContent = 'Erreur: ' + error.message;
+      console.error('Erreur de connexion:', error);
+    });
+  </script>
+</body>
+</html>

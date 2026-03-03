@@ -116,6 +116,165 @@ function getMJPlayers(room) {
   }));
 }
 
+// ─── Simulation des bots ─────────────────────────────────────────────────────
+
+// Choisit un élément aléatoire dans un tableau
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// Simule les actions nocturnes des bots pour l'étape en cours
+function simulateBotNightActions(io, room, step) {
+  // Délai aléatoire pour simuler la réflexion (1,5 – 3 s)
+  const delay = 1500 + Math.random() * 1500;
+
+  setTimeout(() => {
+    // Vérifier que la partie est toujours à cette étape (guard contre race conditions)
+    if (room.status !== 'playing' || room.gameState.nightStep !== step) return;
+
+    const alive = room.players.filter(p => p.isAlive);
+
+    if (step === 'cupidon') {
+      const bot = alive.find(p => p.role === 'cupidon' && p.isBot);
+      if (!bot) return;
+
+      const pool = alive.filter(p => p.playerId !== bot.playerId);
+      if (pool.length < 2) { advanceNightStep(io, room); return; }
+
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      const [p1, p2] = shuffled;
+      p1.loverPartnerId = p2.playerId;
+      p2.loverPartnerId = p1.playerId;
+      if (p1.socketId) io.to(p1.socketId).emit('youAreLovers', { partnerName: p2.name });
+      if (p2.socketId) io.to(p2.socketId).emit('youAreLovers', { partnerName: p1.name });
+      touch(room); saveRooms();
+      advanceNightStep(io, room);
+
+    } else if (step === 'voyante') {
+      const bot = alive.find(p => p.role === 'voyante' && p.isBot);
+      if (!bot) return;
+      // La voyante bot voit un rôle aléatoire (pas de UI, on avance)
+      touch(room);
+      advanceNightStep(io, room);
+
+    } else if (step === 'loups') {
+      const aliveWolves = alive.filter(p => p.role === 'loup');
+      const botWolves   = aliveWolves.filter(p => p.isBot && !room.gameState.wolfVotes[p.playerId]);
+      if (botWolves.length === 0) return; // Tous les loups bots ont déjà voté
+
+      // Les loups bots votent pour une cible non-loup aléatoire
+      const targets = alive.filter(p => p.role !== 'loup');
+      if (targets.length === 0) { advanceNightStep(io, room); return; }
+      const target = pickRandom(targets);
+
+      botWolves.forEach(wolf => { room.gameState.wolfVotes[wolf.playerId] = target.playerId; });
+
+      const votedWolves = aliveWolves.filter(w => room.gameState.wolfVotes[w.playerId]);
+
+      // Informer les loups humains du vote des bots
+      aliveWolves.filter(w => !w.isBot && w.socketId).forEach(w => {
+        io.to(w.socketId).emit('wolfVoteUpdate', {
+          votes: room.gameState.wolfVotes,
+          total: aliveWolves.length,
+          voted: votedWolves.length
+        });
+      });
+
+      if (votedWolves.length >= aliveWolves.length) {
+        const counts = {};
+        Object.values(room.gameState.wolfVotes).forEach(id => { counts[id] = (counts[id] || 0) + 1; });
+        const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+        room.gameState.wolfTarget = top ? top[0] : null;
+        touch(room); saveRooms();
+        advanceNightStep(io, room);
+      } else {
+        touch(room); saveRooms();
+      }
+
+    } else if (step === 'sorciere') {
+      const bot = alive.find(p => p.role === 'sorciere' && p.isBot);
+      if (!bot) return;
+      // Stratégie bot : utiliser la potion de vie si quelqu'un est ciblé, jamais la mort
+      if (room.gameState.wolfTarget && room.gameState.witchPotions.heal) {
+        room.gameState.witchHealed = true;
+        room.gameState.witchPotions.heal = false;
+      }
+      touch(room); saveRooms();
+      advanceNightStep(io, room);
+
+    } else if (step === 'petite_fille') {
+      const bot = alive.find(p => p.role === 'petite_fille' && p.isBot);
+      if (!bot) return;
+      // La petite fille bot passe son tour discrètement
+      touch(room);
+      advanceNightStep(io, room);
+    }
+  }, delay);
+}
+
+// Simule le vote du jour de tous les bots vivants
+function simulateBotDayVotes(io, room) {
+  const aliveBots = room.players.filter(p => p.isAlive && p.isBot);
+  if (aliveBots.length === 0) return;
+
+  const delay = 1500 + Math.random() * 1500;
+
+  setTimeout(() => {
+    if (room.status !== 'playing' || !room.gameState.voteOpen) return;
+
+    const alive = room.players.filter(p => p.isAlive);
+
+    aliveBots.forEach(bot => {
+      if (room.gameState.dayVotes[bot.playerId]) return; // déjà voté
+      const targets = alive.filter(p => p.playerId !== bot.playerId);
+      if (targets.length === 0) return;
+      room.gameState.dayVotes[bot.playerId] = pickRandom(targets).playerId;
+    });
+
+    touch(room); saveRooms();
+
+    const aliveReal  = alive.filter(p => !p.isBot).length;
+    const votedReal  = alive.filter(p => !p.isBot && room.gameState.dayVotes[p.playerId]).length;
+
+    io.to(room.id).emit('voteUpdate', { voteCount: votedReal, aliveCount: aliveReal });
+
+    const mj = room.players.find(p => p.isMJ && p.socketId);
+    if (mj) io.to(mj.socketId).emit('mjVoteUpdate', { votes: room.gameState.dayVotes });
+
+    if (aliveReal === 0 || votedReal >= aliveReal) resolveDay(io, room);
+  }, delay);
+}
+
+// Gère le tir automatique d'un Chasseur bot à sa mort
+function simulateBotChasseur(io, room, deadHunter, allDeaths, phase) {
+  const targets = room.players.filter(p => p.isAlive && p.playerId !== deadHunter.playerId);
+
+  if (targets.length > 0) {
+    const target = pickRandom(targets);
+    const extraDeaths = resolveNightKills([target.playerId], room.players);
+    allDeaths.push(...extraDeaths);
+    io.to(room.id).emit('chasseurShot', {
+      name: target.name,
+      role: target.role,
+      players: getPublicPlayers(room)
+    });
+  }
+
+  room.gameState.waitingForChasseur = null;
+  touch(room);
+
+  const victory = checkVictory(room.players);
+  if (victory) { saveRooms(); endGame(io, room, victory); return; }
+  saveRooms();
+
+  if (phase === 'night') {
+    finishNightResolution(io, room, allDeaths);
+  } else {
+    // Phase jour : la mort vient d'être annoncée via playerEliminated juste avant l'appel
+    setTimeout(() => startNewNight(io, room), 4000);
+  }
+}
+
 // ─── Boucle de jeu (nuit) ───────────────────────────────────────────────────
 
 function advanceNightStep(io, room) {
@@ -153,6 +312,9 @@ function advanceNightStep(io, room) {
       });
     }
   }
+
+  // Simulation automatique des bots pour cette étape
+  simulateBotNightActions(io, room, nextStep);
 }
 
 function resolveNight(io, room) {
@@ -172,9 +334,14 @@ function resolveNight(io, room) {
   // Gestion du Chasseur : il tire en mourant
   const deadHunter = deaths.find(d => d.role === 'chasseur');
   if (deadHunter) {
+    if (deadHunter.isBot) {
+      // Bot chasseur : tir automatique, puis on finit la nuit normalement
+      simulateBotChasseur(io, room, deadHunter, deaths, 'night');
+      return;
+    }
+    // Chasseur humain : attendre son tir
     room.gameState.waitingForChasseur = deadHunter.playerId;
     saveRooms();
-    // Informer tout le monde et attendre le tir du chasseur
     const deathInfo = deaths.map(d => ({ name: d.name, role: d.role, playerId: d.playerId }));
     io.to(room.id).emit('nightEnd', { deaths: deathInfo, waitingForChasseur: true });
     if (deadHunter.socketId) {
@@ -247,22 +414,34 @@ function resolveDay(io, room) {
 
       // Chasseur éliminé de jour
       if (eliminated.role === 'chasseur') {
-        room.gameState.waitingForChasseur = eliminated.playerId;
         room.gameState.voteOpen = false;
-        saveRooms();
-        io.to(room.id).emit('playerEliminated', {
-          name: eliminated.name,
-          role: eliminated.role,
-          playerId: eliminated.playerId,
-          players: getPublicPlayers(room),
-          waitingForChasseur: true
-        });
-        if (eliminated.socketId) {
-          io.to(eliminated.socketId).emit('chasseurAlert', {
-            message: 'Vous êtes éliminé. Désignez un joueur à éliminer avant de partir.'
+        if (eliminated.isBot) {
+          // Bot chasseur : tir automatique avant l'annonce
+          const targets = room.players.filter(p => p.isAlive && p.playerId !== eliminated.playerId);
+          if (targets.length > 0) {
+            const t = pickRandom(targets);
+            resolveNightKills([t.playerId], room.players);
+            io.to(room.id).emit('chasseurShot', { name: t.name, role: t.role, players: getPublicPlayers(room) });
+          }
+          // Laisser le code tomber dans l'emit playerEliminated ci-dessous
+        } else {
+          // Chasseur humain : attendre son tir
+          room.gameState.waitingForChasseur = eliminated.playerId;
+          saveRooms();
+          io.to(room.id).emit('playerEliminated', {
+            name: eliminated.name,
+            role: eliminated.role,
+            playerId: eliminated.playerId,
+            players: getPublicPlayers(room),
+            waitingForChasseur: true
           });
+          if (eliminated.socketId) {
+            io.to(eliminated.socketId).emit('chasseurAlert', {
+              message: 'Vous êtes éliminé. Désignez un joueur à éliminer avant de partir.'
+            });
+          }
+          return;
         }
-        return;
       }
 
       saveRooms();
@@ -533,10 +712,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── addTestPlayers ────────────────────────────────────────────────────────
+  // ── addTestPlayers (MJ uniquement) ───────────────────────────────────────
   socket.on('addTestPlayers', ({ roomId }) => {
     const room = rooms.get(roomId);
     if (!room || room.status !== 'lobby') return;
+    const sender = room.players.find(p => p.socketId === socket.id);
+    if (!sender || !sender.isMJ) return;
 
     const botNames = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank', 'Gabriel', 'Héloïse'];
     const existing = room.players.map(p => p.name);
@@ -569,10 +750,12 @@ io.on('connection', (socket) => {
     if (mj) io.to(mj.socketId).emit('mjUpdate', { players: getMJPlayers(room) });
   });
 
-  // ── setComposition ────────────────────────────────────────────────────────
+  // ── setComposition (MJ uniquement) ───────────────────────────────────────
   socket.on('setComposition', ({ roomId, composition }) => {
     const room = rooms.get(roomId);
     if (!room || room.status !== 'lobby') return;
+    const sender = room.players.find(p => p.socketId === socket.id);
+    if (!sender || !sender.isMJ) return;
     room.gameState.composition = composition;
     touch(room);
     saveRooms();
@@ -761,6 +944,9 @@ io.on('connection', (socket) => {
       players: getPublicPlayers(room),
       aliveCount: alivePlayers.length
     });
+
+    // Simulation automatique des bots
+    simulateBotDayVotes(io, room);
   });
 
   // ── submitVote : un joueur vote pendant la phase jour ─────────────────────

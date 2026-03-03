@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lobby - Loup-Garou</title>
+  <title>Lobby — Loup-Garou</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -11,92 +11,200 @@
     <header>
       <h1>🐺 Salle d'attente</h1>
       <div style="text-align: center; margin-top: 15px;">
-        <p style="color: #aaa; margin-bottom: 5px;">Code:</p>
-        <p style="font-size: 2rem; font-weight: bold; letter-spacing: 2px; margin-bottom: 10px;">
-          <span id="room-code"></span>
-        </p>
-        <button id="copy-btn" class="btn btn-small">Copier le code</button>
+        <p style="color: var(--text-muted); margin-bottom: 5px;">Code de la salle :</p>
+        <p id="room-code-display" style="font-size: 2rem; font-weight: bold; letter-spacing: 4px; margin-bottom: 10px;"></p>
+        <button id="copy-btn" class="btn btn-small btn-secondary">📋 Copier le code</button>
       </div>
     </header>
-    
+
     <main>
+      <!-- Liste des joueurs -->
       <div class="card">
-        <h2>Joueurs (<span id="player-count">0</span>)</h2>
+        <h2>Joueurs (<span id="player-count">0</span>/20)</h2>
         <ul id="player-list" class="player-list"></ul>
       </div>
-      
+
+      <!-- Panel MJ -->
       <div id="mj-panel" class="card" style="display: none;">
-        <h2>Configuration MJ</h2>
-        <div style="margin-bottom: 15px;">
-          <label>Loups: <input type="number" id="loup" min="1" max="10" value="2"></label>
-          <label>Villageois: <input type="number" id="villageois" min="0" max="15" value="2"></label>
-          <label>Voyante: <input type="number" id="voyante" min="0" max="1" value="1"></label>
-          <label>Sorcière: <input type="number" id="sorciere" min="0" max="1" value="1"></label>
+        <h2>⚙️ Configuration (MJ)</h2>
+        <div class="role-config">
+          <label>
+            <span>Loups-Garous</span>
+            <input type="number" id="loup" min="1" max="10" value="2">
+          </label>
+          <label>
+            <span>Villageois</span>
+            <input type="number" id="villageois" min="0" max="15" value="2">
+          </label>
+          <label>
+            <span>Voyante</span>
+            <input type="number" id="voyante" min="0" max="1" value="1">
+          </label>
+          <label>
+            <span>Sorcière</span>
+            <input type="number" id="sorciere" min="0" max="1" value="1">
+          </label>
+          <label>
+            <span>Chasseur</span>
+            <input type="number" id="chasseur" min="0" max="1" value="0">
+          </label>
+          <label>
+            <span>Cupidon</span>
+            <input type="number" id="cupidon" min="0" max="1" value="0">
+          </label>
         </div>
-        <p id="status"></p>
-        <button id="test-btn" class="btn btn-secondary" style="margin-bottom: 10px;">Ajouter 6 bots</button>
-        <button id="start-btn" class="btn btn-primary" disabled>Lancer</button>
+        <p id="comp-status" style="font-weight: 600; margin: 10px 0;"></p>
+        <button id="test-btn" class="btn btn-secondary">🤖 Ajouter des bots</button>
+        <button id="start-btn" class="btn btn-primary" disabled>🎮 Lancer la partie</button>
       </div>
-      
-      <div id="wait-panel" class="card">
-        <p>En attente du MJ...</p>
+
+      <!-- Panel attente joueur -->
+      <div id="wait-panel" class="card" style="display: none;">
+        <p style="text-align: center; color: var(--text-muted);">
+          ⏳ En attente du lancement par le Maître du Jeu…
+        </p>
       </div>
     </main>
-    
+
     <div id="notification" class="notification"></div>
   </div>
-  
+
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/session.js"></script>
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const roomId = params.get('room');
-    const isMJ = params.get('mj') === 'true';
-    const socket = io();
+    // ── Init ─────────────────────────────────────────────────────────────────
+    const params  = new URLSearchParams(window.location.search);
+    const roomId  = params.get('room');
 
-    let players = [];
-    let composition = {};
-
-    document.getElementById('room-code').textContent = roomId;
-
-    if (isMJ) {
-      document.getElementById('mj-panel').style.display = 'block';
-      document.getElementById('wait-panel').style.display = 'none';
+    if (!roomId) {
+      window.location.href = 'index.html';
     }
 
-    document.getElementById('copy-btn').addEventListener('click', () => {
-      navigator.clipboard.writeText(roomId);
-      showNotif('Code copié !', 'success');
+    const socket  = io({ reconnection: true, reconnectionAttempts: 10 });
+    let players   = [];
+    let isMJ      = false;
+    let composition = {};
+
+    document.getElementById('room-code-display').textContent = roomId;
+
+    // ── Identify au (re)connect ───────────────────────────────────────────────
+    socket.on('connect', () => {
+      const token = getOrCreateSessionToken();
+      socket.emit('identify', { sessionToken: token, roomId });
     });
 
-    if (isMJ) {
-      ['loup', 'villageois', 'voyante', 'sorciere'].forEach(id => {
-        document.getElementById(id).addEventListener('input', updateComp);
+    // ── Session restaurée ────────────────────────────────────────────────────
+    socket.on('sessionRestored', (data) => {
+      isMJ    = data.isMJ;
+      players = data.players;
+
+      saveRoomContext(roomId, data.playerNumber, data.isMJ, false);
+      renderLobby();
+      updatePlayerList(players);
+      if (isMJ) updateCompStatus();
+
+      // Si la partie a déjà commencé (reconnexion en cours de route)
+      if (data.status === 'playing') {
+        markGameStarted();
+        window.location.href = `game.html?room=${roomId}`;
+      }
+    });
+
+    // ── Session expirée → retour accueil ─────────────────────────────────────
+    socket.on('sessionExpired', () => {
+      clearRoomContext();
+      window.location.href = 'index.html';
+    });
+
+    // ── Mise à jour de la liste des joueurs ───────────────────────────────────
+    socket.on('playersUpdate', ({ players: p }) => {
+      players = p;
+      updatePlayerList(players);
+      if (isMJ) updateCompStatus();
+    });
+
+    // ── Partie lancée ─────────────────────────────────────────────────────────
+    socket.on('gameStarted', () => {
+      markGameStarted();
+      window.location.href = `game.html?room=${roomId}`;
+    });
+
+    // ── Erreurs ───────────────────────────────────────────────────────────────
+    socket.on('gameError', ({ message }) => showNotif(message, 'error'));
+    socket.on('joinError', ({ message }) => {
+      showNotif(message, 'error');
+      setTimeout(() => { window.location.href = 'index.html'; }, 2500);
+    });
+
+    // ── Composition ───────────────────────────────────────────────────────────
+    socket.on('compositionUpdated', ({ composition: c }) => {
+      if (!isMJ) composition = c;
+    });
+
+    // ── Rendu interface ───────────────────────────────────────────────────────
+    function renderLobby() {
+      if (isMJ) {
+        document.getElementById('mj-panel').style.display  = 'block';
+        document.getElementById('wait-panel').style.display = 'none';
+      } else {
+        document.getElementById('mj-panel').style.display  = 'none';
+        document.getElementById('wait-panel').style.display = 'block';
+      }
+    }
+
+    function updatePlayerList(list) {
+      const ul = document.getElementById('player-list');
+      ul.innerHTML = '';
+      list.forEach(p => {
+        const li = document.createElement('li');
+        li.className = p.online ? 'online' : '';
+        li.textContent = p.name + (p.isMJ ? ' 👑' : '') + (p.isBot ? ' 🤖' : '');
+        ul.appendChild(li);
+      });
+      document.getElementById('player-count').textContent = list.length;
+    }
+
+    // ── Copier le code ────────────────────────────────────────────────────────
+    document.getElementById('copy-btn').addEventListener('click', () => {
+      navigator.clipboard.writeText(roomId).then(() => showNotif('Code copié !', 'success'));
+    });
+
+    // ── Composition MJ ───────────────────────────────────────────────────────
+    if (true) { // Sera géré après identify
+      const roleIds = ['loup', 'villageois', 'voyante', 'sorciere', 'chasseur', 'cupidon'];
+
+      roleIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', onCompChange);
       });
 
-      function updateComp() {
+      function onCompChange() {
+        if (!isMJ) return;
         composition = {};
-        ['loup', 'villageois', 'voyante', 'sorciere'].forEach(id => {
+        roleIds.forEach(id => {
           const v = parseInt(document.getElementById(id).value) || 0;
           if (v > 0) composition[id] = v;
         });
-
-        const total = Object.values(composition).reduce((a, b) => a + b, 0);
-        const status = document.getElementById('status');
-        const btn = document.getElementById('start-btn');
-
-        if (total === players.length && players.length >= 6) {
-          status.textContent = `✓ ${total} rôles`;
-          status.style.color = '#4caf50';
-          btn.disabled = false;
-        } else {
-          status.textContent = `${total} rôles pour ${players.length} joueurs`;
-          status.style.color = '#f44336';
-          btn.disabled = true;
-        }
-
         socket.emit('setComposition', { roomId, composition });
+        updateCompStatus();
       }
+
+      function updateCompStatus() {
+        const total = Object.values(composition).reduce((a, b) => a + b, 0);
+        const statusEl = document.getElementById('comp-status');
+        const startBtn = document.getElementById('start-btn');
+
+        if (!statusEl || !startBtn) return;
+
+        const valid = total === players.length && players.length >= 6;
+        statusEl.textContent = valid
+          ? `✓ ${total} rôles pour ${players.length} joueurs`
+          : `${total} rôles — ${players.length} joueurs (min. 6)`;
+        statusEl.style.color = valid ? 'var(--success)' : 'var(--error)';
+        startBtn.disabled = !valid;
+      }
+
+      window.updateCompStatus = updateCompStatus;
 
       document.getElementById('start-btn').addEventListener('click', () => {
         socket.emit('startGame', { roomId });
@@ -105,43 +213,18 @@
       document.getElementById('test-btn').addEventListener('click', () => {
         socket.emit('addTestPlayers', { roomId });
       });
-    }
 
-    socket.on('playerJoined', ({ players: p }) => {
-      players = p;
-      updateList();
-      if (isMJ) updateComp();
-    });
-
-    socket.on('testPlayersAdded', ({ count }) => {
-      showNotif(`${count} bots ajoutés`, 'success');
-    });
-
-    socket.on('gameStarted', () => {
-      window.location.href = `game.html?room=${roomId}`;
-    });
-
-    socket.on('error', ({ message }) => {
-      showNotif(message, 'error');
-    });
-
-    function updateList() {
-      const list = document.getElementById('player-list');
-      list.innerHTML = '';
-      players.forEach(p => {
-        const li = document.createElement('li');
-        li.textContent = p.name;
-        if (p.online) li.classList.add('online');
-        list.appendChild(li);
+      socket.on('testPlayersAdded', ({ count }) => {
+        showNotif(`${count} bot(s) ajouté(s)`, 'success');
       });
-      document.getElementById('player-count').textContent = players.length;
     }
 
+    // ── Notifications ─────────────────────────────────────────────────────────
     function showNotif(msg, type = 'info') {
       const n = document.getElementById('notification');
       n.textContent = msg;
       n.className = `notification ${type} show`;
-      setTimeout(() => n.classList.remove('show'), 3000);
+      setTimeout(() => n.classList.remove('show'), 3500);
     }
   </script>
 </body>

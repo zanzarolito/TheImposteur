@@ -211,11 +211,40 @@ input:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #2a2a4a;
 }
 
 .role-config input {
   width: 80px;
   margin: 0;
+}
+
+.connection-status {
+  text-align: center;
+  margin-top: 10px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.status-dot.online  { background: var(--success); }
+.status-dot.offline { background: var(--error); }
+
+.btn-accent {
+  background: var(--success);
+  color: white;
+}
+
+.btn-accent:hover {
+  background: #3d9140;
 }
 
 #composition-status {

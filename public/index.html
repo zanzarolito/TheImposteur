@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loup-Garou en Ligne</title>
+  <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -11,82 +12,127 @@
     <header>
       <h1>🐺 Loup-Garou en Ligne</h1>
       <p class="subtitle">Jouez au Loup-Garou avec vos amis</p>
-      <div id="connection-status" style="text-align: center; margin-top: 10px;">
-        <span style="color: #ff9800;">⏳ Connexion...</span>
+      <div id="connection-status" class="connection-status">
+        <span class="status-dot offline"></span> Connexion...
       </div>
     </header>
-    
+
     <main>
-      <div class="card">
-        <input type="text" id="player-name" placeholder="Votre pseudo" maxlength="20">
+      <!-- Reprendre une partie en cours -->
+      <div id="resume-card" class="card" style="display: none;">
+        <h2>Partie en cours</h2>
+        <p id="resume-info" style="color: var(--text-muted); margin-bottom: 15px;"></p>
+        <button id="resume-btn" class="btn btn-accent">Reprendre la partie</button>
+        <button id="quit-party-btn" class="btn btn-secondary">Quitter cette partie</button>
+      </div>
+
+      <!-- Créer / Rejoindre -->
+      <div id="main-card" class="card">
+        <input type="text" id="player-name" placeholder="Votre pseudo" maxlength="20" autocomplete="off">
+
         <button id="create-room-btn" class="btn btn-primary">Créer une partie</button>
-        
+
         <div class="divider">ou</div>
-        
-        <input type="text" id="room-code" placeholder="Code de la room" maxlength="8">
+
+        <input type="text" id="room-code" placeholder="Code de la salle (6 caractères)" maxlength="6" autocomplete="off" style="text-transform: uppercase;">
         <button id="join-room-btn" class="btn btn-secondary">Rejoindre</button>
       </div>
     </main>
-    
+
     <div id="notification" class="notification"></div>
   </div>
-  
+
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/session.js"></script>
   <script>
-    const socket = io();
-    let ready = false;
+    const socket = io({ reconnection: true, reconnectionAttempts: 5 });
+    let connected = false;
 
+    // ── Statut de connexion ──────────────────────────────────────────────────
     socket.on('connect', () => {
-      ready = true;
-      document.getElementById('connection-status').innerHTML = '<span style="color: #4caf50;">✓ Connecté</span>';
+      connected = true;
+      document.getElementById('connection-status').innerHTML =
+        '<span class="status-dot online"></span> Connecté';
     });
 
     socket.on('disconnect', () => {
-      ready = false;
-      document.getElementById('connection-status').innerHTML = '<span style="color: #f44336;">✗ Déconnecté</span>';
+      connected = false;
+      document.getElementById('connection-status').innerHTML =
+        '<span class="status-dot offline"></span> Déconnecté';
     });
 
+    // ── Reprise de partie ────────────────────────────────────────────────────
+    (function checkResumeContext() {
+      const ctx = getRoomContext();
+      if (ctx.roomId) {
+        document.getElementById('resume-info').textContent =
+          `Salle : ${ctx.roomId}`;
+        document.getElementById('resume-card').style.display = 'block';
+      }
+    })();
+
+    document.getElementById('resume-btn').addEventListener('click', () => {
+      const ctx = getRoomContext();
+      if (!ctx.roomId) return;
+      // La page cible (lobby ou game) s'occupera de l'identify
+      if (ctx.gameStarted) {
+        window.location.href = `game.html?room=${ctx.roomId}`;
+      } else {
+        window.location.href = `lobby.html?room=${ctx.roomId}`;
+      }
+    });
+
+    document.getElementById('quit-party-btn').addEventListener('click', () => {
+      clearRoomContext();
+      document.getElementById('resume-card').style.display = 'none';
+    });
+
+    // ── Créer une salle ──────────────────────────────────────────────────────
     document.getElementById('create-room-btn').addEventListener('click', () => {
-      if (!ready) return showNotif('Connexion en cours...', 'warning');
+      if (!connected) return showNotif('Connexion en cours…', 'warning');
       const name = document.getElementById('player-name').value.trim();
-      if (!name) return showNotif('Entrez un pseudo', 'error');
-      
+      if (!name) return showNotif('Entrez votre pseudo', 'error');
+
       const token = getOrCreateSessionToken();
       socket.emit('createRoom', { playerName: name, sessionToken: token });
     });
 
+    socket.on('roomCreated', ({ roomId, playerNumber, isMJ }) => {
+      saveRoomContext(roomId, playerNumber, isMJ, false);
+      window.location.href = `lobby.html?room=${roomId}`;
+    });
+
+    // ── Rejoindre une salle ──────────────────────────────────────────────────
     document.getElementById('join-room-btn').addEventListener('click', () => {
-      if (!ready) return showNotif('Connexion en cours...', 'warning');
+      if (!connected) return showNotif('Connexion en cours…', 'warning');
       const name = document.getElementById('player-name').value.trim();
       const code = document.getElementById('room-code').value.trim().toUpperCase();
-      
-      if (!name) return showNotif('Entrez un pseudo', 'error');
-      if (code.length !== 8) return showNotif('Code invalide (8 caractères)', 'error');
-      
+
+      if (!name) return showNotif('Entrez votre pseudo', 'error');
+      if (code.length < 4) return showNotif('Code de salle invalide', 'error');
+
       const token = getOrCreateSessionToken();
       socket.emit('joinRoom', { roomId: code, playerName: name, sessionToken: token });
     });
 
-    socket.on('roomCreated', ({ roomId }) => {
-      saveRoomContext(roomId, 1);
-      window.location.href = `lobby.html?room=${roomId}&mj=true`;
+    // Validation en temps réel du code (majuscules)
+    document.getElementById('room-code').addEventListener('input', function () {
+      this.value = this.value.toUpperCase();
     });
 
-    socket.on('roomJoined', ({ roomId }) => {
-      saveRoomContext(roomId, 1);
+    socket.on('roomJoined', ({ roomId, playerNumber, isMJ }) => {
+      saveRoomContext(roomId, playerNumber, isMJ, false);
       window.location.href = `lobby.html?room=${roomId}`;
     });
 
-    socket.on('error', ({ message }) => {
-      showNotif(message, 'error');
-    });
+    socket.on('joinError', ({ message }) => showNotif(message, 'error'));
 
+    // ── Notifications ────────────────────────────────────────────────────────
     function showNotif(msg, type = 'info') {
       const n = document.getElementById('notification');
       n.textContent = msg;
       n.className = `notification ${type} show`;
-      setTimeout(() => n.classList.remove('show'), 3000);
+      setTimeout(() => n.classList.remove('show'), 3500);
     }
   </script>
 </body>

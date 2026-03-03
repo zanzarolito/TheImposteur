@@ -3,58 +3,146 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Partie en cours - Loup-Garou</title>
+  <title>Partie en cours — Loup-Garou</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div class="container">
     <header>
       <h1>🐺 Loup-Garou</h1>
-      <div id="game-status" class="game-phase">
-        <h2 id="phase-title">Phase</h2>
-        <p id="phase-description"></p>
+      <div class="game-phase">
+        <h2 id="phase-title">En attente…</h2>
+        <p id="phase-description" style="color: var(--text-muted);"></p>
       </div>
     </header>
-    
+
     <main>
-      <div id="role-reveal" class="card" style="display: none;">
+      <!-- ① Révélation du rôle ─────────────────────────────────────────── -->
+      <div id="role-reveal" class="card screen" style="display: none;">
         <div class="role-card">
+          <div id="role-icon" style="font-size: 3rem; margin-bottom: 10px;"></div>
           <h2 id="role-name"></h2>
           <p id="role-description"></p>
         </div>
-        <button id="hide-role-btn" class="btn btn-primary">J'ai vu mon rôle</button>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 15px;">
+          Mémorisez votre rôle, il ne sera plus affiché ensuite.
+        </p>
+        <button id="hide-role-btn" class="btn btn-primary" style="margin-top: 15px;">J'ai vu mon rôle ✓</button>
       </div>
-      
-      <div id="night-action" class="card" style="display: none;">
-        <h2 id="action-title">Votre action</h2>
-        <p id="action-description"></p>
+
+      <!-- ② Amoureux ───────────────────────────────────────────────────── -->
+      <div id="lovers-reveal" class="card screen" style="display: none;">
+        <div style="text-align: center; padding: 20px;">
+          <p style="font-size: 3rem;">💕</p>
+          <h2 id="lovers-title">Vous êtes amoureux !</h2>
+          <p id="lovers-partner" style="color: var(--text-muted); margin-top: 10px;"></p>
+        </div>
+        <button id="lovers-ok-btn" class="btn btn-primary">Compris ✓</button>
+      </div>
+
+      <!-- ③ Action nuit ─────────────────────────────────────────────────── -->
+      <div id="night-action" class="card screen" style="display: none;">
+        <h2 id="action-title"></h2>
+        <p id="action-description" style="color: var(--text-muted); margin-bottom: 20px;"></p>
+
+        <!-- Grille de sélection joueurs (loups / voyante / cupidon) -->
         <div id="player-selection" class="player-grid"></div>
-        <button id="confirm-action-btn" class="btn btn-primary" disabled>Confirmer</button>
+
+        <!-- Sorcière : potions -->
+        <div id="witch-options" style="display: none;">
+          <div id="witch-heal-section">
+            <p id="witch-victim-info" style="color: var(--warning); margin-bottom: 15px;"></p>
+            <button id="witch-heal-btn" class="btn btn-accent">💊 Utiliser la potion de Vie</button>
+          </div>
+          <div id="witch-kill-section" style="margin-top: 15px;">
+            <p style="color: var(--text-muted); margin-bottom: 10px;">Potion de Mort :</p>
+            <div id="witch-kill-grid" class="player-grid"></div>
+          </div>
+          <button id="witch-skip-btn" class="btn btn-secondary" style="margin-top: 15px;">Passer (ne rien faire)</button>
+        </div>
+
+        <!-- Résultat voyante -->
+        <div id="voyant-result" style="display: none; padding: 20px; text-align: center;">
+          <p id="voyant-result-text" style="font-size: 1.1rem;"></p>
+        </div>
+
+        <!-- Cupidon : 2 sélections -->
+        <div id="cupidon-hint" style="display: none; color: var(--text-muted); margin-bottom: 10px;">
+          Sélectionnez 2 joueurs à lier (vous pouvez vous inclure).
+          <br><span id="cupidon-count">0/2 sélectionné(s)</span>
+        </div>
+
+        <button id="confirm-action-btn" class="btn btn-primary" disabled style="margin-top: 15px;">
+          Confirmer
+        </button>
       </div>
-      
-      <div id="day-vote" class="card" style="display: none;">
-        <h2>Vote du village</h2>
-        <p>Choisissez qui éliminer</p>
-        <div id="vote-selection" class="player-grid"></div>
-        <p id="vote-count">Votes: <span id="vote-current">0</span>/<span id="vote-total">0</span></p>
+
+      <!-- ④ Vote du jour ────────────────────────────────────────────────── -->
+      <div id="day-vote" class="card screen" style="display: none;">
+        <h2>🗳 Vote du village</h2>
+        <p style="color: var(--text-muted); margin-bottom: 15px;">Choisissez le joueur à éliminer :</p>
+        <div id="vote-grid" class="player-grid"></div>
+        <div id="vote-status" style="text-align: center; margin-top: 15px; color: var(--text-muted);">
+          Votes : <span id="vote-current">0</span> / <span id="vote-total">0</span>
+        </div>
+        <p id="my-vote-status" style="text-align: center; color: var(--success); display: none;">✓ Vous avez voté</p>
       </div>
-      
-      <div id="waiting-screen" class="card">
-        <p style="text-align: center;">En attente...</p>
+
+      <!-- ⑤ Attente ────────────────────────────────────────────────────── -->
+      <div id="waiting-screen" class="card screen">
+        <div style="text-align: center; padding: 20px;">
+          <p style="font-size: 2rem; margin-bottom: 10px;">⏳</p>
+          <p id="waiting-text">En attente…</p>
+        </div>
       </div>
-      
-      <div id="death-announcement" class="card" style="display: none;">
-        <h2>Résultats</h2>
-        <div id="death-list"></div>
+
+      <!-- ⑥ Résultats nuit / élimination ──────────────────────────────── -->
+      <div id="death-screen" class="card screen" style="display: none;">
+        <h2 id="death-title">Résultats</h2>
+        <div id="death-list" style="margin: 15px 0;"></div>
+        <p id="death-continue" style="color: var(--text-muted); text-align: center;"></p>
+      </div>
+
+      <!-- ⑦ Chasseur ────────────────────────────────────────────────────── -->
+      <div id="chasseur-screen" class="card screen" style="display: none;">
+        <h2>🏹 Chasseur</h2>
+        <p id="chasseur-msg" style="color: var(--warning); margin-bottom: 15px;"></p>
+        <div id="chasseur-grid" class="player-grid"></div>
+      </div>
+
+      <!-- ⑧ Fin de partie ──────────────────────────────────────────────── -->
+      <div id="game-end-screen" class="card screen" style="display: none;">
+        <div style="text-align: center; padding: 20px;">
+          <p id="end-icon" style="font-size: 4rem;"></p>
+          <h2 id="end-winner"></h2>
+          <p id="end-subtitle" style="color: var(--text-muted); margin: 10px 0 20px;"></p>
+          <div id="end-all-roles" style="margin-bottom: 20px;"></div>
+          <button onclick="window.location.href='index.html'" class="btn btn-primary">
+            Nouvelle partie
+          </button>
+        </div>
+      </div>
+
+      <!-- ⑨ Dashboard MJ ───────────────────────────────────────────────── -->
+      <div id="mj-dashboard" class="card" style="display: none;">
+        <h2>🎲 Dashboard MJ</h2>
+        <div id="mj-players-list" style="margin-bottom: 15px;"></div>
+        <div id="mj-night-controls" style="display: none;">
+          <p id="mj-current-step" style="color: var(--text-muted); margin-bottom: 10px;"></p>
+          <button id="mj-next-btn" class="btn btn-secondary">⏭ Étape suivante</button>
+        </div>
+        <div id="mj-day-controls" style="display: none;">
+          <button id="mj-vote-btn" class="btn btn-accent">🗳 Lancer le vote</button>
+          <button id="mj-close-vote-btn" class="btn btn-secondary" style="display: none;">✓ Clore le vote</button>
+        </div>
       </div>
     </main>
-    
+
     <div id="notification" class="notification"></div>
   </div>
-  
+
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/session.js"></script>
-  <script src="js/socket-client.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>

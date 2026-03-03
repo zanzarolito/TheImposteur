@@ -5,6 +5,52 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lobby — Loup-Garou</title>
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Bandeau rôle du joueur actuel */
+    .my-role-banner {
+      text-align: center;
+      padding: 12px 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-weight: 600;
+      font-size: 1rem;
+    }
+    .my-role-banner.is-mj {
+      background: linear-gradient(135deg, #b8860b, #e8b400);
+      color: #1a1a2e;
+    }
+    .my-role-banner.is-player {
+      background: var(--bg-card);
+      border: 1px solid #2a2a4a;
+      color: var(--text-muted);
+    }
+
+    /* Entrée MJ dans la liste */
+    .player-list li.mj-entry {
+      border-left: 3px solid #e8b400;
+      font-weight: 600;
+    }
+    .player-list li .badge-mj {
+      display: inline-block;
+      font-size: 0.7rem;
+      background: #e8b400;
+      color: #1a1a2e;
+      border-radius: 4px;
+      padding: 1px 5px;
+      margin-left: 8px;
+      vertical-align: middle;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Chargement initial */
+    #loading-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+  </style>
 </head>
 <body>
   <div class="container">
@@ -18,52 +64,75 @@
     </header>
 
     <main>
-      <!-- Liste des joueurs -->
-      <div class="card">
-        <h2>Joueurs (<span id="player-count">0</span>/20)</h2>
-        <ul id="player-list" class="player-list"></ul>
+      <!-- Chargement -->
+      <div id="loading-state" class="card">
+        <p>⏳ Connexion à la salle…</p>
       </div>
 
-      <!-- Panel MJ -->
-      <div id="mj-panel" class="card" style="display: none;">
-        <h2>⚙️ Configuration (MJ)</h2>
-        <div class="role-config">
-          <label>
-            <span>Loups-Garous</span>
-            <input type="number" id="loup" min="1" max="10" value="2">
-          </label>
-          <label>
-            <span>Villageois</span>
-            <input type="number" id="villageois" min="0" max="15" value="2">
-          </label>
-          <label>
-            <span>Voyante</span>
-            <input type="number" id="voyante" min="0" max="1" value="1">
-          </label>
-          <label>
-            <span>Sorcière</span>
-            <input type="number" id="sorciere" min="0" max="1" value="1">
-          </label>
-          <label>
-            <span>Chasseur</span>
-            <input type="number" id="chasseur" min="0" max="1" value="0">
-          </label>
-          <label>
-            <span>Cupidon</span>
-            <input type="number" id="cupidon" min="0" max="1" value="0">
-          </label>
+      <!-- Contenu principal (masqué jusqu'à l'identification) -->
+      <div id="lobby-content" style="display: none;">
+
+        <!-- Bandeau identité du joueur actuel -->
+        <div id="my-role-banner" class="my-role-banner"></div>
+
+        <!-- Liste des joueurs -->
+        <div class="card">
+          <h2>Joueurs (<span id="player-count">0</span>/20)</h2>
+          <ul id="player-list" class="player-list"></ul>
         </div>
-        <p id="comp-status" style="font-weight: 600; margin: 10px 0;"></p>
-        <button id="test-btn" class="btn btn-secondary">🤖 Ajouter des bots</button>
-        <button id="start-btn" class="btn btn-primary" disabled>🎮 Lancer la partie</button>
-      </div>
 
-      <!-- Panel attente joueur -->
-      <div id="wait-panel" class="card" style="display: none;">
-        <p style="text-align: center; color: var(--text-muted);">
-          ⏳ En attente du lancement par le Maître du Jeu…
-        </p>
-      </div>
+        <!-- ═══ Panel MJ (caché pour les non-MJ) ═══ -->
+        <div id="mj-panel" style="display: none;">
+          <div class="card">
+            <h2>⚙️ Composition des rôles</h2>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 15px;">
+              Le total doit correspondre exactement au nombre de joueurs.
+            </p>
+            <div class="role-config">
+              <label>
+                <span>🐺 Loups-Garous</span>
+                <input type="number" id="loup" min="1" max="10" value="2">
+              </label>
+              <label>
+                <span>👨‍🌾 Villageois</span>
+                <input type="number" id="villageois" min="0" max="15" value="2">
+              </label>
+              <label>
+                <span>🔮 Voyante</span>
+                <input type="number" id="voyante" min="0" max="1" value="1">
+              </label>
+              <label>
+                <span>🧪 Sorcière</span>
+                <input type="number" id="sorciere" min="0" max="1" value="1">
+              </label>
+              <label>
+                <span>🏹 Chasseur</span>
+                <input type="number" id="chasseur" min="0" max="1" value="0">
+              </label>
+              <label>
+                <span>💘 Cupidon</span>
+                <input type="number" id="cupidon" min="0" max="1" value="0">
+              </label>
+            </div>
+            <p id="comp-status" style="font-weight: 600; margin: 12px 0;"></p>
+          </div>
+
+          <div class="card">
+            <button id="test-btn" class="btn btn-secondary">🤖 Compléter avec des bots</button>
+            <button id="start-btn" class="btn btn-primary" disabled>🎮 Lancer la partie</button>
+          </div>
+        </div>
+
+        <!-- ═══ Panel joueur (visible pour les non-MJ) ═══ -->
+        <div id="wait-panel" style="display: none;">
+          <div class="card" style="text-align: center; padding: 30px;">
+            <p style="font-size: 1.5rem; margin-bottom: 10px;">⏳</p>
+            <p style="font-weight: 600; margin-bottom: 8px;">En attente du Maître du Jeu</p>
+            <p id="wait-mj-name" style="color: var(--text-muted); font-size: 0.95rem;"></p>
+          </div>
+        </div>
+
+      </div><!-- /lobby-content -->
     </main>
 
     <div id="notification" class="notification"></div>
@@ -72,51 +141,49 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/session.js"></script>
   <script>
-    // ── Init ─────────────────────────────────────────────────────────────────
     const params  = new URLSearchParams(window.location.search);
     const roomId  = params.get('room');
-
-    if (!roomId) {
-      window.location.href = 'index.html';
-    }
+    if (!roomId) window.location.href = 'index.html';
 
     const socket  = io({ reconnection: true, reconnectionAttempts: 10 });
     let players   = [];
     let isMJ      = false;
+    let myName    = '';
     let composition = {};
+
+    const roleIds = ['loup', 'villageois', 'voyante', 'sorciere', 'chasseur', 'cupidon'];
 
     document.getElementById('room-code-display').textContent = roomId;
 
     // ── Identify au (re)connect ───────────────────────────────────────────────
     socket.on('connect', () => {
-      const token = getOrCreateSessionToken();
-      socket.emit('identify', { sessionToken: token, roomId });
+      socket.emit('identify', { sessionToken: getOrCreateSessionToken(), roomId });
     });
 
-    // ── Session restaurée ────────────────────────────────────────────────────
+    // ── Session restaurée ─────────────────────────────────────────────────────
     socket.on('sessionRestored', (data) => {
       isMJ    = data.isMJ;
       players = data.players;
+      myName  = players.find(p => p.playerNumber === data.playerNumber)?.name || '';
 
       saveRoomContext(roomId, data.playerNumber, data.isMJ, false);
-      renderLobby();
+      revealLobby();
       updatePlayerList(players);
       if (isMJ) updateCompStatus();
 
-      // Si la partie a déjà commencé (reconnexion en cours de route)
       if (data.status === 'playing') {
         markGameStarted();
         window.location.href = `game.html?room=${roomId}`;
       }
     });
 
-    // ── Session expirée → retour accueil ─────────────────────────────────────
+    // ── Session expirée ───────────────────────────────────────────────────────
     socket.on('sessionExpired', () => {
       clearRoomContext();
       window.location.href = 'index.html';
     });
 
-    // ── Mise à jour de la liste des joueurs ───────────────────────────────────
+    // ── Mise à jour joueurs ───────────────────────────────────────────────────
     socket.on('playersUpdate', ({ players: p }) => {
       players = p;
       updatePlayerList(players);
@@ -136,32 +203,64 @@
       setTimeout(() => { window.location.href = 'index.html'; }, 2500);
     });
 
-    // ── Composition ───────────────────────────────────────────────────────────
-    socket.on('compositionUpdated', ({ composition: c }) => {
-      if (!isMJ) composition = c;
-    });
+    socket.on('compositionUpdated', ({ composition: c }) => { if (!isMJ) composition = c; });
+    socket.on('testPlayersAdded', ({ count }) => showNotif(`${count} bot(s) ajouté(s)`, 'success'));
 
-    // ── Rendu interface ───────────────────────────────────────────────────────
-    function renderLobby() {
+    // ── Affichage initial selon le rôle ───────────────────────────────────────
+    function revealLobby() {
+      document.getElementById('loading-state').style.display = 'none';
+      document.getElementById('lobby-content').style.display = 'block';
+
+      const banner = document.getElementById('my-role-banner');
       if (isMJ) {
+        banner.textContent = '👑 Vous êtes le Maître du Jeu — configurez la partie ci-dessous';
+        banner.className   = 'my-role-banner is-mj';
         document.getElementById('mj-panel').style.display  = 'block';
         document.getElementById('wait-panel').style.display = 'none';
       } else {
+        const mj = players.find(p => p.isMJ);
+        banner.textContent = '👤 Vous êtes joueur — en attente du Maître du Jeu';
+        banner.className   = 'my-role-banner is-player';
         document.getElementById('mj-panel').style.display  = 'none';
         document.getElementById('wait-panel').style.display = 'block';
+        if (mj) {
+          document.getElementById('wait-mj-name').textContent = `Maître du Jeu : ${mj.name}`;
+        }
       }
     }
 
+    // ── Liste des joueurs ─────────────────────────────────────────────────────
     function updatePlayerList(list) {
       const ul = document.getElementById('player-list');
       ul.innerHTML = '';
       list.forEach(p => {
         const li = document.createElement('li');
-        li.className = p.online ? 'online' : '';
-        li.textContent = p.name + (p.isMJ ? ' 👑' : '') + (p.isBot ? ' 🤖' : '');
+        li.className = (p.online ? 'online' : '') + (p.isMJ ? ' mj-entry' : '');
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = p.name + (p.isBot ? ' 🤖' : '');
+
+        // Badge MJ
+        if (p.isMJ) {
+          const badge = document.createElement('span');
+          badge.className = 'badge-mj';
+          badge.textContent = 'MJ';
+          li.appendChild(nameSpan);
+          li.appendChild(badge);
+        } else {
+          li.appendChild(nameSpan);
+        }
+
         ul.appendChild(li);
       });
       document.getElementById('player-count').textContent = list.length;
+
+      // Mettre à jour le nom du MJ dans le panel attente
+      if (!isMJ) {
+        const mj = list.find(p => p.isMJ);
+        const el = document.getElementById('wait-mj-name');
+        if (el && mj) el.textContent = `Maître du Jeu : ${mj.name}`;
+      }
     }
 
     // ── Copier le code ────────────────────────────────────────────────────────
@@ -169,55 +268,46 @@
       navigator.clipboard.writeText(roomId).then(() => showNotif('Code copié !', 'success'));
     });
 
-    // ── Composition MJ ───────────────────────────────────────────────────────
-    if (true) { // Sera géré après identify
-      const roleIds = ['loup', 'villageois', 'voyante', 'sorciere', 'chasseur', 'cupidon'];
+    // ── Composition (MJ seulement) ────────────────────────────────────────────
+    roleIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', onCompChange);
+    });
 
+    function onCompChange() {
+      if (!isMJ) return;  // Double-sécurité client
+      composition = {};
       roleIds.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('input', onCompChange);
+        const v = parseInt(document.getElementById(id).value) || 0;
+        if (v > 0) composition[id] = v;
       });
-
-      function onCompChange() {
-        if (!isMJ) return;
-        composition = {};
-        roleIds.forEach(id => {
-          const v = parseInt(document.getElementById(id).value) || 0;
-          if (v > 0) composition[id] = v;
-        });
-        socket.emit('setComposition', { roomId, composition });
-        updateCompStatus();
-      }
-
-      function updateCompStatus() {
-        const total = Object.values(composition).reduce((a, b) => a + b, 0);
-        const statusEl = document.getElementById('comp-status');
-        const startBtn = document.getElementById('start-btn');
-
-        if (!statusEl || !startBtn) return;
-
-        const valid = total === players.length && players.length >= 6;
-        statusEl.textContent = valid
-          ? `✓ ${total} rôles pour ${players.length} joueurs`
-          : `${total} rôles — ${players.length} joueurs (min. 6)`;
-        statusEl.style.color = valid ? 'var(--success)' : 'var(--error)';
-        startBtn.disabled = !valid;
-      }
-
-      window.updateCompStatus = updateCompStatus;
-
-      document.getElementById('start-btn').addEventListener('click', () => {
-        socket.emit('startGame', { roomId });
-      });
-
-      document.getElementById('test-btn').addEventListener('click', () => {
-        socket.emit('addTestPlayers', { roomId });
-      });
-
-      socket.on('testPlayersAdded', ({ count }) => {
-        showNotif(`${count} bot(s) ajouté(s)`, 'success');
-      });
+      socket.emit('setComposition', { roomId, composition });
+      updateCompStatus();
     }
+
+    function updateCompStatus() {
+      const total    = Object.values(composition).reduce((a, b) => a + b, 0);
+      const statusEl = document.getElementById('comp-status');
+      const startBtn = document.getElementById('start-btn');
+      if (!statusEl || !startBtn) return;
+
+      const valid = total === players.length && players.length >= 6;
+      statusEl.textContent = valid
+        ? `✓ ${total} rôles pour ${players.length} joueurs`
+        : `${total} rôles — ${players.length} joueur(s) (min. 6 requis)`;
+      statusEl.style.color = valid ? 'var(--success)' : 'var(--error)';
+      startBtn.disabled = !valid;
+    }
+
+    document.getElementById('start-btn').addEventListener('click', () => {
+      if (!isMJ) return;
+      socket.emit('startGame', { roomId });
+    });
+
+    document.getElementById('test-btn').addEventListener('click', () => {
+      if (!isMJ) return;
+      socket.emit('addTestPlayers', { roomId });
+    });
 
     // ── Notifications ─────────────────────────────────────────────────────────
     function showNotif(msg, type = 'info') {

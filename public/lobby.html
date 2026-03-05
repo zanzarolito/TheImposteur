@@ -77,7 +77,7 @@
 
         <!-- Liste des joueurs -->
         <div class="card">
-          <h2>Joueurs (<span id="player-count">0</span>/20)</h2>
+          <h2>Joueurs (<span id="player-count">0</span>/20 hors MJ)</h2>
           <ul id="player-list" class="player-list"></ul>
         </div>
 
@@ -85,36 +85,46 @@
         <div id="mj-panel" style="display: none;">
           <div class="card">
             <h2>⚙️ Composition des rôles</h2>
-            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 15px;">
-              Le total doit correspondre exactement au nombre de joueurs.
-            </p>
-            <div class="role-config">
-              <label>
-                <span>🐺 Loups-Garous</span>
-                <input type="number" id="loup" min="1" max="10" value="2">
-              </label>
-              <label>
-                <span>👨‍🌾 Villageois</span>
-                <input type="number" id="villageois" min="0" max="15" value="2">
-              </label>
-              <label>
+
+            <!-- Nombre de loups -->
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #2a2a4a; margin-bottom:6px;">
+              <span>🐺 Loups-Garous</span>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <button id="wolf-minus" class="btn btn-small btn-secondary" style="width:34px; padding:4px 0; font-size:1.2rem;">−</button>
+                <span id="wolf-count" style="font-size:1.4rem; font-weight:bold; min-width:28px; text-align:center;">2</span>
+                <button id="wolf-plus"  class="btn btn-small btn-secondary" style="width:34px; padding:4px 0; font-size:1.2rem;">+</button>
+              </div>
+            </div>
+            <p style="color:var(--text-muted); font-size:0.82rem; margin-bottom:16px;">Conseil : 1 loup pour 3 joueurs</p>
+
+            <!-- Rôles spéciaux -->
+            <p style="font-weight:600; margin-bottom:10px;">Rôles spéciaux :</p>
+            <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:18px;">
+              <label style="display:flex; align-items:center; gap:12px; cursor:pointer;">
+                <input type="checkbox" id="check-voyante"  checked style="width:18px;height:18px;cursor:pointer;">
                 <span>🔮 Voyante</span>
-                <input type="number" id="voyante" min="0" max="1" value="1">
               </label>
-              <label>
+              <label style="display:flex; align-items:center; gap:12px; cursor:pointer;">
+                <input type="checkbox" id="check-sorciere" checked style="width:18px;height:18px;cursor:pointer;">
                 <span>🧪 Sorcière</span>
-                <input type="number" id="sorciere" min="0" max="1" value="1">
               </label>
-              <label>
+              <label style="display:flex; align-items:center; gap:12px; cursor:pointer;">
+                <input type="checkbox" id="check-chasseur" style="width:18px;height:18px;cursor:pointer;">
                 <span>🏹 Chasseur</span>
-                <input type="number" id="chasseur" min="0" max="1" value="0">
               </label>
-              <label>
+              <label style="display:flex; align-items:center; gap:12px; cursor:pointer;">
+                <input type="checkbox" id="check-cupidon"  style="width:18px;height:18px;cursor:pointer;">
                 <span>💘 Cupidon</span>
-                <input type="number" id="cupidon" min="0" max="1" value="0">
               </label>
             </div>
-            <p id="comp-status" style="font-weight: 600; margin: 12px 0;"></p>
+
+            <!-- Villageois auto-calculés -->
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--bg-card); border:1px solid #2a2a4a; border-radius:8px; margin-bottom:14px;">
+              <span style="color:var(--text-muted);">👨‍🌾 Villageois (calculés automatiquement)</span>
+              <span id="villager-count" style="font-size:1.4rem; font-weight:bold;">2</span>
+            </div>
+
+            <p id="comp-status" style="font-weight:600; margin:0;"></p>
           </div>
 
           <div class="card">
@@ -151,7 +161,7 @@
     let myName    = '';
     let composition = {};
 
-    const roleIds = ['loup', 'villageois', 'voyante', 'sorciere', 'chasseur', 'cupidon'];
+    let wolfCount = 2;
 
     document.getElementById('room-code-display').textContent = roomId;
 
@@ -169,7 +179,7 @@
       saveRoomContext(roomId, data.playerNumber, data.isMJ, false);
       revealLobby();
       updatePlayerList(players);
-      if (isMJ) updateCompStatus();
+      if (isMJ) updateComposition();
 
       if (data.status === 'playing') {
         markGameStarted();
@@ -187,7 +197,7 @@
     socket.on('playersUpdate', ({ players: p }) => {
       players = p;
       updatePlayerList(players);
-      if (isMJ) updateCompStatus();
+      if (isMJ) updateComposition();
     });
 
     // ── Partie lancée ─────────────────────────────────────────────────────────
@@ -253,7 +263,8 @@
 
         ul.appendChild(li);
       });
-      document.getElementById('player-count').textContent = list.length;
+      const nonMJCount = list.filter(p => !p.isMJ).length;
+      document.getElementById('player-count').textContent = nonMJCount;
 
       // Mettre à jour le nom du MJ dans le panel attente
       if (!isMJ) {
@@ -268,36 +279,63 @@
       navigator.clipboard.writeText(roomId).then(() => showNotif('Code copié !', 'success'));
     });
 
-    // ── Composition (MJ seulement) ────────────────────────────────────────────
-    roleIds.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.addEventListener('input', onCompChange);
-    });
+    // ── Composition (MJ seulement) — Option A ────────────────────────────────
 
-    function onCompChange() {
-      if (!isMJ) return;  // Double-sécurité client
-      composition = {};
-      roleIds.forEach(id => {
-        const v = parseInt(document.getElementById(id).value) || 0;
-        if (v > 0) composition[id] = v;
-      });
-      socket.emit('setComposition', { roomId, composition });
-      updateCompStatus();
-    }
+    function updateComposition() {
+      if (!isMJ) return;
+      const playerCount = players.filter(p => !p.isMJ).length;
+      const specials = ['voyante', 'sorciere', 'chasseur', 'cupidon'];
+      const specialCount = specials.filter(r => document.getElementById(`check-${r}`)?.checked).length;
+      const villagers = playerCount - wolfCount - specialCount;
 
-    function updateCompStatus() {
-      const total    = Object.values(composition).reduce((a, b) => a + b, 0);
-      const statusEl = document.getElementById('comp-status');
-      const startBtn = document.getElementById('start-btn');
+      // Bornes du curseur loups selon joueurs présents
+      const maxWolves = Math.max(1, playerCount - specialCount - 1);
+      if (wolfCount > maxWolves) wolfCount = maxWolves;
+      if (wolfCount < 1) wolfCount = 1;
+      document.getElementById('wolf-count').textContent = wolfCount;
+      document.getElementById('wolf-minus').disabled = wolfCount <= 1;
+      document.getElementById('wolf-plus').disabled  = wolfCount >= maxWolves;
+
+      const villagerEl = document.getElementById('villager-count');
+      const statusEl   = document.getElementById('comp-status');
+      const startBtn   = document.getElementById('start-btn');
       if (!statusEl || !startBtn) return;
 
-      const valid = total === players.length && players.length >= 6;
-      statusEl.textContent = valid
-        ? `✓ ${total} rôles pour ${players.length} joueurs`
-        : `${total} rôles — ${players.length} joueur(s) (min. 6 requis)`;
-      statusEl.style.color = valid ? 'var(--success)' : 'var(--error)';
-      startBtn.disabled = !valid;
+      villagerEl.textContent = Math.max(0, villagers);
+
+      const valid = playerCount >= 6 && villagers >= 0;
+      if (!valid) {
+        statusEl.textContent = villagers < 0
+          ? `Trop de rôles spéciaux (retirez-en ${-villagers})`
+          : `Minimum 6 joueurs requis (${playerCount} actuellement)`;
+        statusEl.style.color = 'var(--error)';
+        startBtn.disabled = true;
+        return;
+      }
+
+      statusEl.textContent = `✓ ${playerCount} rôles prêts à distribuer`;
+      statusEl.style.color = 'var(--success)';
+      startBtn.disabled = false;
+
+      composition = { loup: wolfCount };
+      if (villagers > 0) composition.villageois = villagers;
+      specials.forEach(r => { if (document.getElementById(`check-${r}`)?.checked) composition[r] = 1; });
+      socket.emit('setComposition', { roomId, composition });
     }
+
+    // Boutons +/− loups
+    document.getElementById('wolf-minus').addEventListener('click', () => {
+      if (wolfCount > 1) { wolfCount--; updateComposition(); }
+    });
+    document.getElementById('wolf-plus').addEventListener('click', () => {
+      wolfCount++;
+      updateComposition();
+    });
+
+    // Checkboxes rôles spéciaux
+    ['voyante', 'sorciere', 'chasseur', 'cupidon'].forEach(r => {
+      document.getElementById(`check-${r}`)?.addEventListener('change', updateComposition);
+    });
 
     document.getElementById('start-btn').addEventListener('click', () => {
       if (!isMJ) return;

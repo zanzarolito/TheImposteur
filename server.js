@@ -233,8 +233,8 @@ function simulateBotDayVotes(io, room) {
 
     touch(room); saveRooms();
 
-    const aliveReal  = alive.filter(p => !p.isBot).length;
-    const votedReal  = alive.filter(p => !p.isBot && room.gameState.dayVotes[p.playerId]).length;
+    const aliveReal  = alive.filter(p => !p.isBot && !p.isMJ).length;
+    const votedReal  = alive.filter(p => !p.isBot && !p.isMJ && room.gameState.dayVotes[p.playerId]).length;
 
     io.to(room.id).emit('voteUpdate', { voteCount: votedReal, aliveCount: aliveReal });
 
@@ -770,27 +770,30 @@ io.on('connection', (socket) => {
     const player = room.players.find(p => p.socketId === socket.id);
     if (!player || !player.isMJ) return;
 
-    if (room.players.length < 6) {
-      socket.emit('gameError', { message: 'Il faut au minimum 6 joueurs pour lancer la partie.' });
+    // Le MJ n'a pas de rôle : seuls les joueurs non-MJ participent
+    const gamePlayers = room.players.filter(p => !p.isMJ);
+
+    if (gamePlayers.length < 6) {
+      socket.emit('gameError', { message: 'Il faut au minimum 6 joueurs (hors MJ) pour lancer la partie.' });
       return;
     }
 
-    const composition = room.gameState.composition || getDefaultComposition(room.players.length);
+    const composition = room.gameState.composition || getDefaultComposition(gamePlayers.length);
     const totalRoles = Object.values(composition).reduce((a, b) => a + b, 0);
 
-    if (totalRoles !== room.players.length) {
+    if (totalRoles !== gamePlayers.length) {
       socket.emit('gameError', {
-        message: `La composition ne correspond pas : ${totalRoles} rôles pour ${room.players.length} joueurs.`
+        message: `La composition ne correspond pas : ${totalRoles} rôles pour ${gamePlayers.length} joueurs.`
       });
       return;
     }
 
-    // Distribuer les rôles via game-logic
-    const assigned = distributeRoles(room.players, composition);
+    // Distribuer les rôles uniquement aux joueurs non-MJ
+    const assigned = distributeRoles(gamePlayers, composition);
     assigned.forEach((p, i) => {
-      room.players[i].role = p.role;
-      room.players[i].isAlive = true;
-      room.players[i].loverPartnerId = null;
+      gamePlayers[i].role = p.role;
+      gamePlayers[i].isAlive = true;
+      gamePlayers[i].loverPartnerId = null;
     });
 
     room.status = 'playing';
@@ -802,9 +805,9 @@ io.on('connection', (socket) => {
     touch(room);
     saveRooms();
 
-    // Envoyer le rôle à chaque joueur connecté
+    // Envoyer le rôle à chaque joueur connecté (pas au MJ)
     room.players.forEach(p => {
-      if (p.socketId) {
+      if (p.socketId && !p.isMJ) {
         io.to(p.socketId).emit('roleAssigned', {
           role: p.role,
           playerNumber: p.playerNumber
@@ -939,7 +942,7 @@ io.on('connection', (socket) => {
     touch(room);
     saveRooms();
 
-    const alivePlayers = room.players.filter(p => p.isAlive);
+    const alivePlayers = room.players.filter(p => p.isAlive && !p.isMJ);
     io.to(roomId).emit('voteStarted', {
       players: getPublicPlayers(room),
       aliveCount: alivePlayers.length
@@ -956,7 +959,7 @@ io.on('connection', (socket) => {
     if (room.gameState.phase !== 'day' || !room.gameState.voteOpen) return;
 
     const player = room.players.find(p => p.socketId === socket.id);
-    if (!player || !player.isAlive) return;
+    if (!player || !player.isAlive || player.isMJ) return;
 
     const target = room.players.find(p => p.playerId === targetId && p.isAlive);
     if (!target) return;
@@ -967,9 +970,9 @@ io.on('connection', (socket) => {
 
     const alivePlayers = room.players.filter(p => p.isAlive);
     const votedCount = alivePlayers.filter(p =>
-      room.gameState.dayVotes[p.playerId] && !p.isBot
+      room.gameState.dayVotes[p.playerId] && !p.isBot && !p.isMJ
     ).length;
-    const aliveReal = alivePlayers.filter(p => !p.isBot).length;
+    const aliveReal = alivePlayers.filter(p => !p.isBot && !p.isMJ).length;
 
     io.to(roomId).emit('voteUpdate', {
       voteCount: votedCount,

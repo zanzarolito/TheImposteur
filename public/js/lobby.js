@@ -52,11 +52,12 @@ if (isMJ) {
     });
     
     const totalRoles = Object.values(composition).reduce((a, b) => a + b, 0);
-    const playerCount = players.length;
-    
+    // Le MJ n'a pas de rôle : on ne compte que les joueurs non-MJ
+    const playerCount = players.filter(p => !p.isMJ).length;
+
     const status = document.getElementById('composition-status');
     const startBtn = document.getElementById('start-game-btn');
-    
+
     if (totalRoles === playerCount && playerCount >= 6) {
       status.textContent = `✓ Configuration valide (${totalRoles} rôles)`;
       status.style.color = '#4caf50';

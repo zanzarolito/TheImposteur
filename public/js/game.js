@@ -430,7 +430,7 @@ socket.on('voteStarted', ({ players: p, aliveCount }) => {
 
 function showDayVote() {
   setPhaseTitle('🗳 Vote du village');
-  const alive = players.filter(p => p.isAlive);
+  const alive = players.filter(p => p.isAlive && !p.isMJ);
   renderPlayerGrid('vote-grid', alive, (playerId) => {
     if (hasVoted) return;
     socket.emit('submitVote', { roomId, targetId: playerId });
@@ -490,7 +490,7 @@ socket.on('noElimination', ({ players: p }) => {
 
 socket.on('chasseurAlert', ({ message }) => {
   setText('chasseur-msg', message);
-  renderPlayerGrid('chasseur-grid', players.filter(p => p.isAlive), (playerId) => {
+  renderPlayerGrid('chasseur-grid', players.filter(p => p.isAlive && !p.isMJ), (playerId) => {
     socket.emit('chasseurShot', { roomId, targetId: playerId });
     showScreen('waiting-screen');
     setText('waiting-text', 'Tir effectué. En attente…');
@@ -542,10 +542,11 @@ socket.on('gameEnd', ({ winner, winners, allPlayers }) => {
   const rolesDiv = document.getElementById('end-all-roles');
   rolesDiv.innerHTML = '<h3 style="margin-bottom:10px;">Rôles révélés :</h3>';
   (allPlayers || []).forEach(p => {
-    const ri = ROLES[p.role] || { icon: '❓', name: p.role };
+    const ri = p.role ? (ROLES[p.role] || { icon: '❓', name: p.role }) : null;
     const row = document.createElement('p');
     row.style.marginBottom = '6px';
-    row.innerHTML = `${p.isAlive ? '🟢' : '💀'} <strong>${p.name}</strong> — ${ri.icon} ${ri.name}`;
+    const roleLabel = ri ? `${ri.icon} ${ri.name}` : '👑 Maître du Jeu';
+    row.innerHTML = `${p.isAlive ? '🟢' : '💀'} <strong>${p.name}</strong> — ${roleLabel}`;
     rolesDiv.appendChild(row);
   });
 
@@ -599,12 +600,12 @@ document.getElementById('mj-close-vote-btn').addEventListener('click', () => {
 
 function getAlivePlayers(excludeSelf = false) {
   const token = getOrCreateSessionToken();
-  return players.filter(p => p.isAlive && (!excludeSelf || p.playerId !== token));
+  return players.filter(p => p.isAlive && !p.isMJ && (!excludeSelf || p.playerId !== token));
 }
 
 function getAliveNotWolves() {
-  // Les loups ne peuvent voter que pour des non-loups (règle classique)
-  return players.filter(p => p.isAlive && p.role !== 'loup');
+  // Les loups ne peuvent voter que pour des non-loups (règle classique), jamais le MJ
+  return players.filter(p => p.isAlive && !p.isMJ && p.role !== 'loup');
 }
 
 // ── Rendu grille joueurs ──────────────────────────────────────────────────────

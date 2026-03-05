@@ -40,55 +40,7 @@
         <button id="lovers-ok-btn" class="btn btn-primary">Compris ✓</button>
       </div>
 
-      <!-- ③ Action nuit ─────────────────────────────────────────────────── -->
-      <div id="night-action" class="card screen" style="display: none;">
-        <h2 id="action-title"></h2>
-        <p id="action-description" style="color: var(--text-muted); margin-bottom: 20px;"></p>
-
-        <!-- Grille de sélection joueurs (loups / voyante / cupidon) -->
-        <div id="player-selection" class="player-grid"></div>
-
-        <!-- Sorcière : potions -->
-        <div id="witch-options" style="display: none;">
-          <div id="witch-heal-section">
-            <p id="witch-victim-info" style="color: var(--warning); margin-bottom: 15px;"></p>
-            <button id="witch-heal-btn" class="btn btn-accent">💊 Utiliser la potion de Vie</button>
-          </div>
-          <div id="witch-kill-section" style="margin-top: 15px;">
-            <p style="color: var(--text-muted); margin-bottom: 10px;">Potion de Mort :</p>
-            <div id="witch-kill-grid" class="player-grid"></div>
-          </div>
-          <button id="witch-skip-btn" class="btn btn-secondary" style="margin-top: 15px;">Passer (ne rien faire)</button>
-        </div>
-
-        <!-- Résultat voyante -->
-        <div id="voyant-result" style="display: none; padding: 20px; text-align: center;">
-          <p id="voyant-result-text" style="font-size: 1.1rem;"></p>
-        </div>
-
-        <!-- Cupidon : 2 sélections -->
-        <div id="cupidon-hint" style="display: none; color: var(--text-muted); margin-bottom: 10px;">
-          Sélectionnez 2 joueurs à lier (vous pouvez vous inclure).
-          <br><span id="cupidon-count">0/2 sélectionné(s)</span>
-        </div>
-
-        <button id="confirm-action-btn" class="btn btn-primary" disabled style="margin-top: 15px;">
-          Confirmer
-        </button>
-      </div>
-
-      <!-- ④ Vote du jour ────────────────────────────────────────────────── -->
-      <div id="day-vote" class="card screen" style="display: none;">
-        <h2>🗳 Vote du village</h2>
-        <p style="color: var(--text-muted); margin-bottom: 15px;">Choisissez le joueur à éliminer :</p>
-        <div id="vote-grid" class="player-grid"></div>
-        <div id="vote-status" style="text-align: center; margin-top: 15px; color: var(--text-muted);">
-          Votes : <span id="vote-current">0</span> / <span id="vote-total">0</span>
-        </div>
-        <p id="my-vote-status" style="text-align: center; color: var(--success); display: none;">✓ Vous avez voté</p>
-      </div>
-
-      <!-- ⑤ Attente ────────────────────────────────────────────────────── -->
+      <!-- ③ Attente joueur ─────────────────────────────────────────────────── -->
       <div id="waiting-screen" class="card screen">
         <div style="text-align: center; padding: 20px;">
           <p style="font-size: 2rem; margin-bottom: 10px;">⏳</p>
@@ -96,21 +48,23 @@
         </div>
       </div>
 
-      <!-- ⑥ Résultats nuit / élimination ──────────────────────────────── -->
+      <!-- ④ Voyante : résultat (sur le téléphone de la voyante) ─────────── -->
+      <div id="voyant-screen" class="card screen" style="display: none;">
+        <div style="text-align:center; padding:20px;">
+          <p style="font-size:2.5rem; margin-bottom:10px;">🔮</p>
+          <p id="voyant-result-text" style="font-size:1.1rem; margin-bottom:20px;"></p>
+          <button id="voyant-ok-btn" class="btn btn-secondary">Compris ✓</button>
+        </div>
+      </div>
+
+      <!-- ⑤ Résultats nuit / élimination ──────────────────────────────── -->
       <div id="death-screen" class="card screen" style="display: none;">
         <h2 id="death-title">Résultats</h2>
         <div id="death-list" style="margin: 15px 0;"></div>
         <p id="death-continue" style="color: var(--text-muted); text-align: center;"></p>
       </div>
 
-      <!-- ⑦ Chasseur ────────────────────────────────────────────────────── -->
-      <div id="chasseur-screen" class="card screen" style="display: none;">
-        <h2>🏹 Chasseur</h2>
-        <p id="chasseur-msg" style="color: var(--warning); margin-bottom: 15px;"></p>
-        <div id="chasseur-grid" class="player-grid"></div>
-      </div>
-
-      <!-- ⑧ Fin de partie ──────────────────────────────────────────────── -->
+      <!-- ⑥ Fin de partie ──────────────────────────────────────────────── -->
       <div id="game-end-screen" class="card screen" style="display: none;">
         <div style="text-align: center; padding: 20px;">
           <p id="end-icon" style="font-size: 4rem;"></p>
@@ -123,17 +77,71 @@
         </div>
       </div>
 
-      <!-- ⑨ Dashboard MJ ───────────────────────────────────────────────── -->
+      <!-- ⑦ Dashboard MJ ───────────────────────────────────────────────── -->
       <div id="mj-dashboard" class="card" style="display: none;">
         <h2>🎲 Dashboard MJ</h2>
-        <div id="mj-players-list" style="margin-bottom: 15px;"></div>
+
+        <!-- Liste des joueurs avec rôles (toujours visible) -->
+        <div id="mj-players-list" style="margin-bottom: 20px;"></div>
+
+        <!-- Contrôles nuit : sélection de cible par étape -->
         <div id="mj-night-controls" style="display: none;">
-          <p id="mj-current-step" style="color: var(--text-muted); margin-bottom: 10px;"></p>
-          <button id="mj-next-btn" class="btn btn-secondary">⏭ Étape suivante</button>
+          <h3 id="mj-step-title" style="margin-bottom: 6px;"></h3>
+          <p id="mj-step-desc" style="color: var(--text-muted); font-size: .9rem; margin-bottom: 14px;"></p>
+
+          <!-- Grille joueurs (cupidon / voyante / loups) -->
+          <div id="mj-selection-grid" class="player-grid"></div>
+
+          <!-- Cupidon : compteur sélection -->
+          <p id="mj-cupidon-hint" style="display:none; color:var(--text-muted); margin: 8px 0;">
+            <span id="mj-cupidon-count">0/2</span> joueur(s) sélectionné(s)
+          </p>
+
+          <!-- Sorcière -->
+          <div id="mj-sorciere-options" style="display: none;">
+            <p id="mj-wolf-victim" style="color: var(--warning); margin-bottom: 12px;"></p>
+            <div id="mj-heal-section">
+              <button id="mj-heal-btn" class="btn btn-accent" style="margin-bottom: 8px;">
+                💊 Sauver la victime (Potion de Vie)
+              </button>
+            </div>
+            <div id="mj-kill-section" style="margin-top: 10px;">
+              <p style="color: var(--text-muted); margin-bottom: 8px;">Potion de Mort — choisir une cible :</p>
+              <div id="mj-kill-grid" class="player-grid"></div>
+            </div>
+            <button id="mj-sorciere-skip-btn" class="btn btn-secondary" style="margin-top: 12px;">
+              Passer (ne rien faire)
+            </button>
+          </div>
+
+          <!-- Résultat voyante (affiché au MJ après sélection) -->
+          <div id="mj-voyant-result" style="display:none; background: var(--bg-card); border: 1px solid #2a2a4a; border-radius: 8px; padding: 14px; text-align: center; margin-bottom: 14px;">
+            <p id="mj-voyant-result-text" style="font-size: 1.1rem;"></p>
+          </div>
+
+          <!-- Bouton confirmer (cupidon / voyante / loups / petite_fille) -->
+          <button id="mj-confirm-night-btn" class="btn btn-primary" disabled style="margin-top: 14px; display: none;">
+            Confirmer
+          </button>
         </div>
+
+        <!-- Contrôles jour : élimination directe -->
         <div id="mj-day-controls" style="display: none;">
-          <button id="mj-vote-btn" class="btn btn-accent">🗳 Lancer le vote</button>
-          <button id="mj-close-vote-btn" class="btn btn-secondary" style="display: none;">✓ Clore le vote</button>
+          <h3 style="margin-bottom: 8px;">☀️ Élimination</h3>
+          <p style="color: var(--text-muted); font-size: .9rem; margin-bottom: 14px;">
+            Le village a voté. Qui est éliminé ?
+          </p>
+          <div id="mj-vote-grid" class="player-grid"></div>
+          <button id="mj-no-elim-btn" class="btn btn-secondary" style="margin-top: 12px;">
+            ⚖️ Égalité — personne n'est éliminé
+          </button>
+        </div>
+
+        <!-- Contrôles chasseur : tir -->
+        <div id="mj-chasseur-controls" style="display: none;">
+          <h3 style="margin-bottom: 8px;">🏹 Tir du Chasseur</h3>
+          <p id="mj-chasseur-msg" style="color: var(--warning); font-size: .9rem; margin-bottom: 14px;"></p>
+          <div id="mj-chasseur-grid" class="player-grid"></div>
         </div>
       </div>
     </main>

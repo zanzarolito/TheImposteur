@@ -3,7 +3,7 @@ const http = require('http');
 const socketIO = require('socket.io');
 const fs = require('fs');
 
-const { distributeRoles, checkVictory, getNextNightStep, resolveNightKills, resolveDayVote } = require('./game-logic');
+const { distributeRoles, checkVictory, getNextNightStep, resolveNightKills } = require('./game-logic');
 const { getDefaultComposition } = require('./roles');
 
 const app = express();
@@ -116,163 +116,10 @@ function getMJPlayers(room) {
   }));
 }
 
-// ─── Simulation des bots ─────────────────────────────────────────────────────
+// ─── Helpers divers ──────────────────────────────────────────────────────────
 
-// Choisit un élément aléatoire dans un tableau
 function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
-}
-
-// Simule les actions nocturnes des bots pour l'étape en cours
-function simulateBotNightActions(io, room, step) {
-  // Délai aléatoire pour simuler la réflexion (1,5 – 3 s)
-  const delay = 1500 + Math.random() * 1500;
-
-  setTimeout(() => {
-    // Vérifier que la partie est toujours à cette étape (guard contre race conditions)
-    if (room.status !== 'playing' || room.gameState.nightStep !== step) return;
-
-    const alive = room.players.filter(p => p.isAlive);
-
-    if (step === 'cupidon') {
-      const bot = alive.find(p => p.role === 'cupidon' && p.isBot);
-      if (!bot) return;
-
-      const pool = alive.filter(p => p.playerId !== bot.playerId);
-      if (pool.length < 2) { advanceNightStep(io, room); return; }
-
-      const shuffled = [...pool].sort(() => Math.random() - 0.5);
-      const [p1, p2] = shuffled;
-      p1.loverPartnerId = p2.playerId;
-      p2.loverPartnerId = p1.playerId;
-      if (p1.socketId) io.to(p1.socketId).emit('youAreLovers', { partnerName: p2.name });
-      if (p2.socketId) io.to(p2.socketId).emit('youAreLovers', { partnerName: p1.name });
-      touch(room); saveRooms();
-      advanceNightStep(io, room);
-
-    } else if (step === 'voyante') {
-      const bot = alive.find(p => p.role === 'voyante' && p.isBot);
-      if (!bot) return;
-      // La voyante bot voit un rôle aléatoire (pas de UI, on avance)
-      touch(room);
-      advanceNightStep(io, room);
-
-    } else if (step === 'loups') {
-      const aliveWolves = alive.filter(p => p.role === 'loup');
-      const botWolves   = aliveWolves.filter(p => p.isBot && !room.gameState.wolfVotes[p.playerId]);
-      if (botWolves.length === 0) return; // Tous les loups bots ont déjà voté
-
-      // Les loups bots votent pour une cible non-loup aléatoire
-      const targets = alive.filter(p => p.role !== 'loup');
-      if (targets.length === 0) { advanceNightStep(io, room); return; }
-      const target = pickRandom(targets);
-
-      botWolves.forEach(wolf => { room.gameState.wolfVotes[wolf.playerId] = target.playerId; });
-
-      const votedWolves = aliveWolves.filter(w => room.gameState.wolfVotes[w.playerId]);
-
-      // Informer les loups humains du vote des bots
-      aliveWolves.filter(w => !w.isBot && w.socketId).forEach(w => {
-        io.to(w.socketId).emit('wolfVoteUpdate', {
-          votes: room.gameState.wolfVotes,
-          total: aliveWolves.length,
-          voted: votedWolves.length
-        });
-      });
-
-      if (votedWolves.length >= aliveWolves.length) {
-        const counts = {};
-        Object.values(room.gameState.wolfVotes).forEach(id => { counts[id] = (counts[id] || 0) + 1; });
-        const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-        room.gameState.wolfTarget = top ? top[0] : null;
-        touch(room); saveRooms();
-        advanceNightStep(io, room);
-      } else {
-        touch(room); saveRooms();
-      }
-
-    } else if (step === 'sorciere') {
-      const bot = alive.find(p => p.role === 'sorciere' && p.isBot);
-      if (!bot) return;
-      // Stratégie bot : utiliser la potion de vie si quelqu'un est ciblé, jamais la mort
-      if (room.gameState.wolfTarget && room.gameState.witchPotions.heal) {
-        room.gameState.witchHealed = true;
-        room.gameState.witchPotions.heal = false;
-      }
-      touch(room); saveRooms();
-      advanceNightStep(io, room);
-
-    } else if (step === 'petite_fille') {
-      const bot = alive.find(p => p.role === 'petite_fille' && p.isBot);
-      if (!bot) return;
-      // La petite fille bot passe son tour discrètement
-      touch(room);
-      advanceNightStep(io, room);
-    }
-  }, delay);
-}
-
-// Simule le vote du jour de tous les bots vivants
-function simulateBotDayVotes(io, room) {
-  const aliveBots = room.players.filter(p => p.isAlive && p.isBot);
-  if (aliveBots.length === 0) return;
-
-  const delay = 1500 + Math.random() * 1500;
-
-  setTimeout(() => {
-    if (room.status !== 'playing' || !room.gameState.voteOpen) return;
-
-    const alive = room.players.filter(p => p.isAlive);
-
-    aliveBots.forEach(bot => {
-      if (room.gameState.dayVotes[bot.playerId]) return; // déjà voté
-      const targets = alive.filter(p => p.playerId !== bot.playerId);
-      if (targets.length === 0) return;
-      room.gameState.dayVotes[bot.playerId] = pickRandom(targets).playerId;
-    });
-
-    touch(room); saveRooms();
-
-    const aliveReal  = alive.filter(p => !p.isBot && !p.isMJ).length;
-    const votedReal  = alive.filter(p => !p.isBot && !p.isMJ && room.gameState.dayVotes[p.playerId]).length;
-
-    io.to(room.id).emit('voteUpdate', { voteCount: votedReal, aliveCount: aliveReal });
-
-    const mj = room.players.find(p => p.isMJ && p.socketId);
-    if (mj) io.to(mj.socketId).emit('mjVoteUpdate', { votes: room.gameState.dayVotes });
-
-    if (aliveReal === 0 || votedReal >= aliveReal) resolveDay(io, room);
-  }, delay);
-}
-
-// Gère le tir automatique d'un Chasseur bot à sa mort
-function simulateBotChasseur(io, room, deadHunter, allDeaths, phase) {
-  const targets = room.players.filter(p => p.isAlive && p.playerId !== deadHunter.playerId);
-
-  if (targets.length > 0) {
-    const target = pickRandom(targets);
-    const extraDeaths = resolveNightKills([target.playerId], room.players);
-    allDeaths.push(...extraDeaths);
-    io.to(room.id).emit('chasseurShot', {
-      name: target.name,
-      role: target.role,
-      players: getPublicPlayers(room)
-    });
-  }
-
-  room.gameState.waitingForChasseur = null;
-  touch(room);
-
-  const victory = checkVictory(room.players);
-  if (victory) { saveRooms(); endGame(io, room, victory); return; }
-  saveRooms();
-
-  if (phase === 'night') {
-    finishNightResolution(io, room, allDeaths);
-  } else {
-    // Phase jour : la mort vient d'être annoncée via playerEliminated juste avant l'appel
-    setTimeout(() => startNewNight(io, room), 4000);
-  }
 }
 
 // ─── Boucle de jeu (nuit) ───────────────────────────────────────────────────
@@ -292,29 +139,24 @@ function advanceNightStep(io, room) {
   saveRooms();
   io.to(room.id).emit('nightStepChanged', { step: nextStep, turn: room.gameState.turn });
 
-  // Informations privées selon l'étape
+  const mj = room.players.find(p => p.isMJ && p.socketId);
+
+  // Informations spécifiques selon l'étape — envoyées au MJ
   if (nextStep === 'loups') {
     const wolves = alivePlayers.filter(p => p.role === 'loup');
     const wolfNames = wolves.map(w => ({ name: w.name, playerId: w.playerId }));
-    wolves.forEach(wolf => {
-      if (wolf.socketId) {
-        io.to(wolf.socketId).emit('wolvesInfo', { teammates: wolfNames });
-      }
-    });
+    if (mj) io.to(mj.socketId).emit('mjNightStepInfo', { step: 'loups', wolves: wolfNames });
+
   } else if (nextStep === 'sorciere') {
-    const sorciere = alivePlayers.find(p => p.role === 'sorciere');
-    if (sorciere && sorciere.socketId) {
-      const victim = room.players.find(p => p.playerId === room.gameState.wolfTarget);
-      io.to(sorciere.socketId).emit('sorciereInfo', {
+    const victim = room.players.find(p => p.playerId === room.gameState.wolfTarget);
+    if (mj) {
+      io.to(mj.socketId).emit('sorciereInfo', {
         victimName: victim ? victim.name : null,
         victimId: room.gameState.wolfTarget || null,
         potions: room.gameState.witchPotions
       });
     }
   }
-
-  // Simulation automatique des bots pour cette étape
-  simulateBotNightActions(io, room, nextStep);
 }
 
 function resolveNight(io, room) {
@@ -331,22 +173,17 @@ function resolveNight(io, room) {
 
   let deaths = resolveNightKills(victims, room.players);
 
-  // Gestion du Chasseur : il tire en mourant
+  // Gestion du Chasseur : le MJ choisit sa cible
   const deadHunter = deaths.find(d => d.role === 'chasseur');
   if (deadHunter) {
-    if (deadHunter.isBot) {
-      // Bot chasseur : tir automatique, puis on finit la nuit normalement
-      simulateBotChasseur(io, room, deadHunter, deaths, 'night');
-      return;
-    }
-    // Chasseur humain : attendre son tir
     room.gameState.waitingForChasseur = deadHunter.playerId;
     saveRooms();
     const deathInfo = deaths.map(d => ({ name: d.name, role: d.role, playerId: d.playerId }));
     io.to(room.id).emit('nightEnd', { deaths: deathInfo, waitingForChasseur: true });
-    if (deadHunter.socketId) {
-      io.to(deadHunter.socketId).emit('chasseurAlert', {
-        message: 'Vous mourez cette nuit. Désignez un joueur à éliminer.'
+    const mj = room.players.find(p => p.isMJ && p.socketId);
+    if (mj) {
+      io.to(mj.socketId).emit('chasseurAlert', {
+        message: `${deadHunter.name} (Chasseur) est mort cette nuit. Choisissez sa cible.`
       });
     }
     return;
@@ -383,7 +220,6 @@ function finishNightResolution(io, room, deaths) {
 
 function startDay(io, room) {
   room.gameState.phase = 'day';
-  room.gameState.dayVotes = {};
   room.gameState.voteOpen = false;
   touch(room);
   saveRooms();
@@ -392,79 +228,10 @@ function startDay(io, room) {
     turn: room.gameState.turn,
     players: getPublicPlayers(room)
   });
-}
 
-function resolveDay(io, room) {
-  const votes = Object.entries(room.gameState.dayVotes).map(([voterId, targetId]) => ({
-    voterId, targetId
-  }));
-
-  const eliminatedId = resolveDayVote(votes, room.players);
-
-  if (!eliminatedId) {
-    room.gameState.voteOpen = false;
-    touch(room);
-    saveRooms();
-    io.to(room.id).emit('noElimination', { players: getPublicPlayers(room) });
-  } else {
-    const eliminated = room.players.find(p => p.playerId === eliminatedId);
-    if (eliminated) {
-      eliminated.isAlive = false;
-      touch(room);
-
-      // Chasseur éliminé de jour
-      if (eliminated.role === 'chasseur') {
-        room.gameState.voteOpen = false;
-        if (eliminated.isBot) {
-          // Bot chasseur : tir automatique avant l'annonce
-          const targets = room.players.filter(p => p.isAlive && p.playerId !== eliminated.playerId);
-          if (targets.length > 0) {
-            const t = pickRandom(targets);
-            resolveNightKills([t.playerId], room.players);
-            io.to(room.id).emit('chasseurShot', { name: t.name, role: t.role, players: getPublicPlayers(room) });
-          }
-          // Laisser le code tomber dans l'emit playerEliminated ci-dessous
-        } else {
-          // Chasseur humain : attendre son tir
-          room.gameState.waitingForChasseur = eliminated.playerId;
-          saveRooms();
-          io.to(room.id).emit('playerEliminated', {
-            name: eliminated.name,
-            role: eliminated.role,
-            playerId: eliminated.playerId,
-            players: getPublicPlayers(room),
-            waitingForChasseur: true
-          });
-          if (eliminated.socketId) {
-            io.to(eliminated.socketId).emit('chasseurAlert', {
-              message: 'Vous êtes éliminé. Désignez un joueur à éliminer avant de partir.'
-            });
-          }
-          return;
-        }
-      }
-
-      saveRooms();
-      io.to(room.id).emit('playerEliminated', {
-        name: eliminated.name,
-        role: eliminated.role,
-        playerId: eliminated.playerId,
-        players: getPublicPlayers(room)
-      });
-    }
-  }
-
-  room.gameState.voteOpen = false;
-  saveRooms();
-
-  const victory = checkVictory(room.players);
-  if (victory) {
-    endGame(io, room, victory);
-    return;
-  }
-
-  // Nouvelle nuit
-  setTimeout(() => startNewNight(io, room), 4000);
+  // Le MJ voit immédiatement le panneau d'élimination
+  const mj = room.players.find(p => p.isMJ && p.socketId);
+  if (mj) io.to(mj.socketId).emit('mjDayControl', { players: getMJPlayers(room) });
 }
 
 function startNewNight(io, room) {
@@ -828,23 +595,20 @@ io.on('connection', (socket) => {
     setTimeout(() => advanceNightStep(io, room), 8000);
   });
 
-  // ── nightAction ───────────────────────────────────────────────────────────
-  socket.on('nightAction', ({ roomId, step, action }) => {
+  // ── mjNightAction : le MJ effectue l'action de nuit ─────────────────────
+  socket.on('mjNightAction', ({ roomId, step, action }) => {
     const room = rooms.get(roomId);
     if (!room || room.status !== 'playing') return;
     if (room.gameState.phase !== 'night' || room.gameState.nightStep !== step) return;
 
-    const player = room.players.find(p => p.socketId === socket.id);
-    if (!player || !player.isAlive) return;
+    const mj = room.players.find(p => p.socketId === socket.id);
+    if (!mj || !mj.isMJ) return;
 
     const alivePlayers = room.players.filter(p => p.isAlive);
 
-    if (step === 'cupidon' && player.role === 'cupidon') {
+    if (step === 'cupidon') {
       const { player1Id, player2Id } = action;
-      if (player1Id === player2Id) {
-        socket.emit('actionError', { message: 'Choisissez deux joueurs différents.' });
-        return;
-      }
+      if (player1Id === player2Id) return;
       const p1 = room.players.find(p => p.playerId === player1Id);
       const p2 = room.players.find(p => p.playerId === player2Id);
       if (p1 && p2) {
@@ -853,54 +617,30 @@ io.on('connection', (socket) => {
         if (p1.socketId) io.to(p1.socketId).emit('youAreLovers', { partnerName: p2.name });
         if (p2.socketId) io.to(p2.socketId).emit('youAreLovers', { partnerName: p1.name });
       }
-      touch(room);
-      saveRooms();
+      touch(room); saveRooms();
       advanceNightStep(io, room);
 
-    } else if (step === 'voyante' && player.role === 'voyante') {
+    } else if (step === 'voyante') {
       const { targetId } = action;
       const target = room.players.find(p => p.playerId === targetId);
       if (target) {
+        // Montrer au MJ ET à la voyante (sur son téléphone, discrètement)
         socket.emit('voyantResult', { targetName: target.name, targetRole: target.role });
+        const voyante = alivePlayers.find(p => p.role === 'voyante' && p.socketId);
+        if (voyante) io.to(voyante.socketId).emit('voyantResult', { targetName: target.name, targetRole: target.role });
       }
-      touch(room);
+      touch(room); saveRooms();
       advanceNightStep(io, room);
 
-    } else if (step === 'loups' && player.role === 'loup') {
+    } else if (step === 'loups') {
       const { targetId } = action;
-      room.gameState.wolfVotes[player.playerId] = targetId;
+      const target = room.players.find(p => p.playerId === targetId && p.isAlive && !p.isMJ);
+      if (!target) return;
+      room.gameState.wolfTarget = targetId;
+      touch(room); saveRooms();
+      advanceNightStep(io, room);
 
-      const aliveWolves = alivePlayers.filter(p => p.role === 'loup');
-      const votedWolves = aliveWolves.filter(w => room.gameState.wolfVotes[w.playerId]);
-
-      // Informer les autres loups du vote
-      aliveWolves.forEach(w => {
-        if (w.socketId && w.playerId !== player.playerId) {
-          io.to(w.socketId).emit('wolfVoteUpdate', {
-            votes: room.gameState.wolfVotes,
-            total: aliveWolves.length,
-            voted: votedWolves.length
-          });
-        }
-      });
-
-      if (votedWolves.length >= aliveWolves.length) {
-        // Calculer la cible majoritaire
-        const counts = {};
-        Object.values(room.gameState.wolfVotes).forEach(id => {
-          counts[id] = (counts[id] || 0) + 1;
-        });
-        const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-        room.gameState.wolfTarget = top ? top[0] : null;
-        touch(room);
-        saveRooms();
-        advanceNightStep(io, room);
-      } else {
-        touch(room);
-        saveRooms();
-      }
-
-    } else if (step === 'sorciere' && player.role === 'sorciere') {
+    } else if (step === 'sorciere') {
       const { type, targetId } = action;
       if (type === 'heal' && room.gameState.witchPotions.heal) {
         room.gameState.witchHealed = true;
@@ -909,9 +649,99 @@ io.on('connection', (socket) => {
         room.gameState.witchKillTarget = targetId;
         room.gameState.witchPotions.kill = false;
       }
-      touch(room);
-      saveRooms();
+      touch(room); saveRooms();
       advanceNightStep(io, room);
+
+    } else if (step === 'petite_fille') {
+      touch(room); saveRooms();
+      advanceNightStep(io, room);
+    }
+  });
+
+  // ── mjEliminatePlayer : le MJ élimine un joueur après le vote du jour ────
+  socket.on('mjEliminatePlayer', ({ roomId, targetId }) => {
+    const room = rooms.get(roomId);
+    if (!room || room.status !== 'playing') return;
+    if (room.gameState.phase !== 'day') return;
+
+    const mj = room.players.find(p => p.socketId === socket.id);
+    if (!mj || !mj.isMJ) return;
+
+    // Égalité / personne
+    if (!targetId || targetId === 'none') {
+      touch(room); saveRooms();
+      io.to(roomId).emit('noElimination', { players: getPublicPlayers(room) });
+      const victory = checkVictory(room.players);
+      if (victory) { endGame(io, room, victory); return; }
+      setTimeout(() => startNewNight(io, room), 4000);
+      return;
+    }
+
+    const target = room.players.find(p => p.playerId === targetId && p.isAlive && !p.isMJ);
+    if (!target) return;
+
+    // resolveNightKills gère la cascade amoureux
+    const deaths = resolveNightKills([targetId], room.players);
+    touch(room);
+
+    // Chasseur parmi les morts → le MJ choisit sa cible
+    const deadChasseur = deaths.find(d => d.role === 'chasseur');
+    if (deadChasseur) {
+      room.gameState.waitingForChasseur = deadChasseur.playerId;
+      saveRooms();
+      io.to(roomId).emit('playerEliminated', {
+        name: target.name, role: target.role, playerId: target.playerId,
+        players: getPublicPlayers(room), waitingForChasseur: true
+      });
+      io.to(socket.id).emit('chasseurAlert', {
+        message: `${deadChasseur.name} (Chasseur) est éliminé. Choisissez sa cible.`
+      });
+      return;
+    }
+
+    saveRooms();
+
+    // Annoncer toutes les morts (cible + amoureux éventuel)
+    deaths.forEach(d => {
+      io.to(roomId).emit('playerEliminated', {
+        name: d.name, role: d.role, playerId: d.playerId,
+        players: getPublicPlayers(room)
+      });
+    });
+
+    const victory = checkVictory(room.players);
+    if (victory) { endGame(io, room, victory); return; }
+    setTimeout(() => startNewNight(io, room), 4000);
+  });
+
+  // ── mjChasseurShot : le MJ choisit la cible du Chasseur ──────────────────
+  socket.on('mjChasseurShot', ({ roomId, targetId }) => {
+    const room = rooms.get(roomId);
+    if (!room || room.status !== 'playing') return;
+    if (!room.gameState.waitingForChasseur) return;
+
+    const mj = room.players.find(p => p.socketId === socket.id);
+    if (!mj || !mj.isMJ) return;
+
+    const target = room.players.find(p => p.playerId === targetId && p.isAlive && !p.isMJ);
+    if (!target) return;
+
+    resolveNightKills([targetId], room.players);
+    room.gameState.waitingForChasseur = null;
+    touch(room);
+
+    const victory = checkVictory(room.players);
+    if (victory) { saveRooms(); endGame(io, room, victory); return; }
+
+    saveRooms();
+    io.to(room.id).emit('chasseurShot', {
+      name: target.name, role: target.role, players: getPublicPlayers(room)
+    });
+
+    if (room.gameState.phase === 'night') {
+      setTimeout(() => finishNightResolution(io, room, []), 3000);
+    } else {
+      setTimeout(() => startNewNight(io, room), 4000);
     }
   });
 
@@ -926,119 +756,6 @@ io.on('connection', (socket) => {
 
     console.log(`[MJ] Force next step dans ${roomId}`);
     advanceNightStep(io, room);
-  });
-
-  // ── startVote : le MJ ouvre le vote du jour ───────────────────────────────
-  socket.on('startVote', ({ roomId }) => {
-    const room = rooms.get(roomId);
-    if (!room || room.status !== 'playing') return;
-    if (room.gameState.phase !== 'day') return;
-
-    const player = room.players.find(p => p.socketId === socket.id);
-    if (!player || !player.isMJ) return;
-
-    room.gameState.dayVotes = {};
-    room.gameState.voteOpen = true;
-    touch(room);
-    saveRooms();
-
-    const alivePlayers = room.players.filter(p => p.isAlive && !p.isMJ);
-    io.to(roomId).emit('voteStarted', {
-      players: getPublicPlayers(room),
-      aliveCount: alivePlayers.length
-    });
-
-    // Simulation automatique des bots
-    simulateBotDayVotes(io, room);
-  });
-
-  // ── submitVote : un joueur vote pendant la phase jour ─────────────────────
-  socket.on('submitVote', ({ roomId, targetId }) => {
-    const room = rooms.get(roomId);
-    if (!room || room.status !== 'playing') return;
-    if (room.gameState.phase !== 'day' || !room.gameState.voteOpen) return;
-
-    const player = room.players.find(p => p.socketId === socket.id);
-    if (!player || !player.isAlive || player.isMJ) return;
-
-    const target = room.players.find(p => p.playerId === targetId && p.isAlive);
-    if (!target) return;
-
-    room.gameState.dayVotes[player.playerId] = targetId;
-    touch(room);
-    saveRooms();
-
-    const alivePlayers = room.players.filter(p => p.isAlive);
-    const votedCount = alivePlayers.filter(p =>
-      room.gameState.dayVotes[p.playerId] && !p.isBot && !p.isMJ
-    ).length;
-    const aliveReal = alivePlayers.filter(p => !p.isBot && !p.isMJ).length;
-
-    io.to(roomId).emit('voteUpdate', {
-      voteCount: votedCount,
-      aliveCount: aliveReal
-    });
-
-    // Mettre à jour le MJ avec les votes
-    const mj = room.players.find(p => p.isMJ && p.socketId);
-    if (mj) {
-      io.to(mj.socketId).emit('mjVoteUpdate', { votes: room.gameState.dayVotes });
-    }
-
-    // Auto-clôture si tous les joueurs humains ont voté
-    if (votedCount >= aliveReal) {
-      resolveDay(io, room);
-    }
-  });
-
-  // ── closeVote : le MJ clôture le vote ────────────────────────────────────
-  socket.on('closeVote', ({ roomId }) => {
-    const room = rooms.get(roomId);
-    if (!room || room.status !== 'playing') return;
-    if (room.gameState.phase !== 'day' || !room.gameState.voteOpen) return;
-
-    const player = room.players.find(p => p.socketId === socket.id);
-    if (!player || !player.isMJ) return;
-
-    resolveDay(io, room);
-  });
-
-  // ── chasseurShot : le chasseur tire en mourant ────────────────────────────
-  socket.on('chasseurShot', ({ roomId, targetId }) => {
-    const room = rooms.get(roomId);
-    if (!room || room.status !== 'playing') return;
-
-    const player = room.players.find(p => p.socketId === socket.id);
-    if (!player || player.role !== 'chasseur') return;
-    if (room.gameState.waitingForChasseur !== player.playerId) return;
-
-    const target = room.players.find(p => p.playerId === targetId && p.isAlive);
-    if (!target) return;
-
-    const chasseurDeaths = resolveNightKills([targetId], room.players);
-    room.gameState.waitingForChasseur = null;
-    touch(room);
-
-    const victory = checkVictory(room.players);
-    if (victory) {
-      saveRooms();
-      endGame(io, room, victory);
-      return;
-    }
-
-    saveRooms();
-    io.to(room.id).emit('chasseurShot', {
-      name: target.name,
-      role: target.role,
-      players: getPublicPlayers(room)
-    });
-
-    // Reprendre le fil selon la phase
-    if (room.gameState.phase === 'night') {
-      setTimeout(() => finishNightResolution(io, room, []), 3000);
-    } else {
-      setTimeout(() => startNewNight(io, room), 4000);
-    }
   });
 
   // ── disconnect ────────────────────────────────────────────────────────────

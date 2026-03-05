@@ -1,4 +1,4 @@
-// ─── game.js — Interface de jeu Loup-Garou ───────────────────────────────────
+// ─── game.js — Interface de jeu Loup-Garou (MJ contrôle tout) ────────────────
 
 const params = new URLSearchParams(window.location.search);
 const roomId = params.get('room');
@@ -8,32 +8,29 @@ if (!roomId) window.location.href = 'index.html';
 const socket = io({ reconnection: true, reconnectionAttempts: 10 });
 
 // ── État local ────────────────────────────────────────────────────────────────
-let myRole      = null;
 let isMJ        = false;
 let players     = [];
-let selectedTargets = [];
 let currentStep = null;
-let witchState  = {};
-let hasVoted    = false;
-let voteOpen    = false;
+let mjSelected  = [];   // sélections MJ (cupidon: 2, autres: 1)
+let witchState  = {};   // état sorcière pour le MJ
 
 // ── Infos des rôles ───────────────────────────────────────────────────────────
 const ROLES = {
-  loup:        { name: 'Loup-Garou',   icon: '🐺', desc: 'Votez chaque nuit pour éliminer un villageois.' },
+  loup:        { name: 'Loup-Garou',   icon: '🐺', desc: 'Vous êtes un Loup-Garou. Le MJ vous dira qui éliminer.' },
   villageois:  { name: 'Villageois',   icon: '👨‍🌾', desc: 'Trouvez et éliminez les loups-garous !' },
-  voyante:     { name: 'Voyante',      icon: '🔮', desc: 'Chaque nuit, révèle le rôle d\'un joueur.' },
-  sorciere:    { name: 'Sorcière',     icon: '🧪', desc: 'Potion de Vie et potion de Mort à usage unique.' },
-  chasseur:    { name: 'Chasseur',     icon: '🏹', desc: 'Vous tirez un joueur en mourant.' },
-  cupidon:     { name: 'Cupidon',      icon: '💘', desc: 'Désignez deux amoureux la première nuit.' },
-  petite_fille:{ name: 'Petite Fille', icon: '👧', desc: 'Vous pouvez espionner les loups-garous.' }
+  voyante:     { name: 'Voyante',      icon: '🔮', desc: 'Le MJ vous révèlera secrètement le rôle d\'un joueur chaque nuit.' },
+  sorciere:    { name: 'Sorcière',     icon: '🧪', desc: 'Le MJ vous indiquera comment utiliser vos potions.' },
+  chasseur:    { name: 'Chasseur',     icon: '🏹', desc: 'Si vous mourez, le MJ vous demandera de désigner une cible.' },
+  cupidon:     { name: 'Cupidon',      icon: '💘', desc: 'Le MJ désignera vos amoureux la première nuit.' },
+  petite_fille:{ name: 'Petite Fille', icon: '👧', desc: 'Vous pouvez tenter d\'espionner les loups-garous.' }
 };
 
 const STEP_LABELS = {
-  cupidon:     'Cupidon se réveille',
-  voyante:     'La Voyante se réveille',
-  loups:       'Les Loups-Garous se réveillent',
-  sorciere:    'La Sorcière se réveille',
-  petite_fille:'La Petite Fille peut espionner'
+  cupidon:      'Cupidon se réveille',
+  voyante:      'La Voyante se réveille',
+  loups:        'Les Loups-Garous se réveillent',
+  sorciere:     'La Sorcière se réveille',
+  petite_fille: 'La Petite Fille peut espionner'
 };
 
 // ── Connexion & identification ────────────────────────────────────────────────
@@ -61,11 +58,8 @@ socket.on('sessionRestored', (data) => {
   } else if (phase === 'day') {
     setPhaseTitle(`☀️ Jour ${turn}`);
     showScreen('waiting-screen');
-    if (data.gameState.voteOpen) {
-      showDayVote();
-    } else {
-      setText('waiting-text', 'Le MJ va ouvrir le vote.');
-    }
+    setText('waiting-text', 'Discussion en cours…');
+    if (isMJ) showMJDayControls();
   }
 });
 
@@ -77,17 +71,13 @@ socket.on('sessionExpired', () => {
 // ── Rôle attribué ─────────────────────────────────────────────────────────────
 
 socket.on('roleAssigned', ({ role }) => {
-  myRole = role;
-  showRoleReveal(role);
-});
-
-function showRoleReveal(role) {
+  if (isMJ) return; // Le MJ n'a pas de rôle
   const info = ROLES[role] || { name: role, icon: '❓', desc: '' };
   setText('role-icon', info.icon);
   setText('role-name', info.name);
   setText('role-description', info.desc);
   showScreen('role-reveal');
-}
+});
 
 document.getElementById('hide-role-btn').addEventListener('click', () => {
   showScreen('waiting-screen');
@@ -97,6 +87,7 @@ document.getElementById('hide-role-btn').addEventListener('click', () => {
 // ── Amoureux ──────────────────────────────────────────────────────────────────
 
 socket.on('youAreLovers', ({ partnerName }) => {
+  if (isMJ) return;
   setText('lovers-partner', `Votre partenaire amoureux : ${partnerName}`);
   showScreen('lovers-reveal');
 });
@@ -106,23 +97,40 @@ document.getElementById('lovers-ok-btn').addEventListener('click', () => {
   setText('waiting-text', 'En attente de la suite de la nuit…');
 });
 
+// ── Voyante : résultat (reçu sur le téléphone de la voyante) ─────────────────
+
+socket.on('voyantResult', ({ targetName, targetRole }) => {
+  if (isMJ) {
+    // Affichage MJ dans le dashboard (géré par showMJVoyantResult)
+    const info = ROLES[targetRole] || { name: targetRole, icon: '❓' };
+    setText('mj-voyant-result-text', `${targetName} est : ${info.icon} ${info.name}`);
+    show('mj-voyant-result');
+    return;
+  }
+  // Voyante player — écran discret
+  const info = ROLES[targetRole] || { name: targetRole, icon: '❓' };
+  setText('voyant-result-text', `${targetName} est : ${info.icon} ${info.name}`);
+  showScreen('voyant-screen');
+});
+
+document.getElementById('voyant-ok-btn').addEventListener('click', () => {
+  showScreen('waiting-screen');
+  setText('waiting-text', 'En attente de la suite…');
+});
+
 // ── Nouvelle nuit ─────────────────────────────────────────────────────────────
 
 socket.on('newNight', ({ turn, players: p }) => {
   players = p;
-  hasVoted = false;
-  voteOpen = false;
-  selectedTargets = [];
-
   setPhaseTitle(`🌙 Nuit ${turn}`);
   setPhaseDesc('Le village s\'endort…');
   showScreen('waiting-screen');
   setText('waiting-text', 'La nuit tombe sur le village…');
 
   if (isMJ) {
-    show('mj-night-controls');
+    hide('mj-night-controls');
     hide('mj-day-controls');
-    setText('mj-current-step', `Nuit ${turn} — en cours`);
+    hide('mj-chasseur-controls');
     updateMJPlayersList();
   }
 });
@@ -135,201 +143,151 @@ socket.on('nightStepChanged', ({ step, turn }) => {
   setPhaseDesc(STEP_LABELS[step] || step);
 
   if (isMJ) {
-    setText('mj-current-step', `Étape : ${STEP_LABELS[step] || step}`);
-    return;
-  }
-
-  const stepRoles = {
-    cupidon:     ['cupidon'],
-    voyante:     ['voyante'],
-    loups:       ['loup'],
-    sorciere:    ['sorciere'],
-    petite_fille:['petite_fille']
-  };
-
-  if ((stepRoles[step] || []).includes(myRole)) {
-    showNightAction(step);
+    showMJNightAction(step);
   } else {
     showScreen('waiting-screen');
     setText('waiting-text', `${STEP_LABELS[step] || step}…`);
   }
 });
 
-function showNightAction(step) {
-  selectedTargets = [];
-  resetNightUI();
+// Infos supplémentaires pour le MJ à l'étape loups
+socket.on('mjNightStepInfo', ({ step, wolves }) => {
+  if (step === 'loups' && wolves) {
+    const names = wolves.map(w => w.name).join(', ');
+    setText('mj-step-desc', `Loups en jeu : ${names}. Choisissez leur victime.`);
+  }
+});
 
-  const actions = {
-    cupidon:     { title: '💘 Cupidon',        desc: 'Désignez 2 joueurs comme amoureux.' },
-    voyante:     { title: '🔮 Voyante',         desc: 'Choisissez un joueur pour voir son rôle.' },
-    loups:       { title: '🐺 Loups-Garous',    desc: 'Choisissez votre victime cette nuit.' },
-    sorciere:    { title: '🧪 Sorcière',        desc: 'Attendez les informations…' },
-    petite_fille:{ title: '👧 Petite Fille',    desc: 'Vous pouvez observer ou dormir.' }
-  };
+// ── MJ : Panneau de contrôle nuit ─────────────────────────────────────────────
 
-  const a = actions[step] || { title: step, desc: '' };
-  setText('action-title', a.title);
-  setText('action-description', a.desc);
+function showMJNightAction(step) {
+  mjSelected = [];
+  witchState = {};
+
+  // Masquer tout, puis afficher le bon sous-panneau
+  hide('mj-day-controls');
+  hide('mj-chasseur-controls');
+  show('mj-night-controls');
+
+  // Reset sous-éléments
+  hide('mj-cupidon-hint');
+  hide('mj-sorciere-options');
+  hide('mj-voyant-result');
+  show('mj-selection-grid');
+  const confirmBtn = document.getElementById('mj-confirm-night-btn');
+  confirmBtn.disabled = true;
+  confirmBtn.style.display = 'none';
+  confirmBtn.textContent = 'Confirmer';
+  confirmBtn.onclick = null;
+
+  const alive = players.filter(p => p.isAlive && !p.isMJ);
+
+  setText('mj-step-title', STEP_LABELS[step] || step);
 
   if (step === 'cupidon') {
-    show('cupidon-hint');
-    renderPlayerGrid('player-selection', getAlivePlayers(), onCupidonSelect);
-    document.getElementById('confirm-action-btn').disabled = true;
+    setText('mj-step-desc', 'Sélectionnez 2 joueurs comme amoureux.');
+    show('mj-cupidon-hint');
+    setText('mj-cupidon-count', '0/2');
+    renderPlayerGrid('mj-selection-grid', alive, onMJCupidonSelect);
+    confirmBtn.style.display = 'block';
 
   } else if (step === 'voyante') {
-    renderPlayerGrid('player-selection', getAlivePlayers(true), onSingleSelect);
-    document.getElementById('confirm-action-btn').disabled = true;
+    setText('mj-step-desc', 'Choisissez le joueur que la Voyante observe.');
+    renderPlayerGrid('mj-selection-grid', alive, onMJSingleSelect);
+    confirmBtn.style.display = 'block';
+    confirmBtn.onclick = () => {
+      if (mjSelected.length !== 1) return;
+      socket.emit('mjNightAction', { roomId, step: 'voyante', action: { targetId: mjSelected[0] } });
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Révélation envoyée…';
+    };
 
   } else if (step === 'loups') {
-    renderPlayerGrid('player-selection', getAliveNotWolves(), onSingleSelect);
-    document.getElementById('confirm-action-btn').disabled = true;
+    setText('mj-step-desc', 'Choisissez la victime des Loups-Garous.');
+    renderPlayerGrid('mj-selection-grid', alive, onMJSingleSelect);
+    confirmBtn.style.display = 'block';
+    confirmBtn.onclick = () => {
+      if (mjSelected.length !== 1) return;
+      socket.emit('mjNightAction', { roomId, step: 'loups', action: { targetId: mjSelected[0] } });
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Victime désignée…';
+    };
 
   } else if (step === 'sorciere') {
-    hide('player-selection');
-    document.getElementById('confirm-action-btn').style.display = 'none';
-    // UI complétée par sorciereInfo
-    show('witch-options');
-    setText('witch-victim-info', 'En attente des informations…');
+    setText('mj-step-desc', 'Informez la Sorcière et gérez les potions.');
+    hide('mj-selection-grid');
+    show('mj-sorciere-options');
+    // sorciereInfo arrivera du serveur et complétera le panneau
 
   } else if (step === 'petite_fille') {
-    hide('player-selection');
-    setText('confirm-action-btn', 'Je dors (ne rien faire)');
-    document.getElementById('confirm-action-btn').disabled = false;
+    setText('mj-step-desc', 'La Petite Fille peut espionner ou dormir. Continuez quand c\'est fait.');
+    hide('mj-selection-grid');
+    confirmBtn.style.display = 'block';
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = 'Continuer →';
+    confirmBtn.onclick = () => {
+      socket.emit('mjNightAction', { roomId, step: 'petite_fille', action: {} });
+      confirmBtn.disabled = true;
+    };
   }
-
-  showScreen('night-action');
 }
 
-function resetNightUI() {
-  hide('witch-options');
-  hide('voyant-result');
-  hide('cupidon-hint');
-  show('player-selection');
-  document.getElementById('player-selection').innerHTML = '';
-  document.getElementById('confirm-action-btn').disabled = true;
-  document.getElementById('confirm-action-btn').style.display = 'block';
-  document.getElementById('confirm-action-btn').textContent = 'Confirmer';
-  document.getElementById('confirm-action-btn').onclick = null;
-}
-
-// ── Sélections joueurs ────────────────────────────────────────────────────────
-
-function onCupidonSelect(playerId) {
-  if (selectedTargets.includes(playerId)) {
-    selectedTargets = selectedTargets.filter(id => id !== playerId);
-  } else if (selectedTargets.length < 2) {
-    selectedTargets.push(playerId);
-  }
-  highlightSelected('player-selection', selectedTargets);
-  setText('cupidon-count', `${selectedTargets.length}/2 sélectionné(s)`);
-  document.getElementById('confirm-action-btn').disabled = selectedTargets.length !== 2;
-}
-
-function onSingleSelect(playerId) {
-  selectedTargets = [playerId];
-  highlightSelected('player-selection', selectedTargets);
-  document.getElementById('confirm-action-btn').disabled = false;
-}
-
-function highlightSelected(containerId, ids) {
-  document.querySelectorAll(`#${containerId} .player-card`).forEach(card => {
-    card.classList.toggle('selected', ids.includes(card.dataset.id));
-  });
-}
-
-// ── Confirmer l'action de nuit ────────────────────────────────────────────────
-
-document.getElementById('confirm-action-btn').addEventListener('click', () => {
-  if (currentStep === 'cupidon' && selectedTargets.length === 2) {
-    socket.emit('nightAction', {
-      roomId, step: 'cupidon',
-      action: { player1Id: selectedTargets[0], player2Id: selectedTargets[1] }
-    });
-    showScreen('waiting-screen');
-    setText('waiting-text', 'Les amoureux ont été désignés. En attente…');
-
-  } else if (currentStep === 'voyante' && selectedTargets.length === 1) {
-    socket.emit('nightAction', {
-      roomId, step: 'voyante',
-      action: { targetId: selectedTargets[0] }
-    });
-
-  } else if (currentStep === 'loups' && selectedTargets.length === 1) {
-    socket.emit('nightAction', {
-      roomId, step: 'loups',
-      action: { targetId: selectedTargets[0] }
-    });
-    setText('confirm-action-btn', 'Vote envoyé…');
-    document.getElementById('confirm-action-btn').disabled = true;
-
-  } else if (currentStep === 'petite_fille') {
-    socket.emit('nightAction', { roomId, step: 'petite_fille', action: { type: 'skip' } });
-    showScreen('waiting-screen');
-    setText('waiting-text', 'Vous dormez sagement…');
-  }
-});
-
-// ── Voyante : résultat ────────────────────────────────────────────────────────
-
-socket.on('voyantResult', ({ targetName, targetRole }) => {
-  const info = ROLES[targetRole] || { name: targetRole, icon: '❓' };
-  hide('player-selection');
-  show('voyant-result');
-  setText('voyant-result-text', `${targetName} est : ${info.icon} ${info.name}`);
-
-  const btn = document.getElementById('confirm-action-btn');
-  btn.textContent = 'Continuer ✓';
+function onMJSingleSelect(playerId) {
+  mjSelected = [playerId];
+  highlightSelected('mj-selection-grid', mjSelected);
+  const btn = document.getElementById('mj-confirm-night-btn');
   btn.disabled = false;
-  btn.onclick = () => {
-    showScreen('waiting-screen');
-    setText('waiting-text', 'En attente de la suite…');
-    btn.onclick = null;
-  };
-});
+}
 
-// ── Loups : coéquipiers ───────────────────────────────────────────────────────
-
-socket.on('wolvesInfo', ({ teammates }) => {
-  const token  = getOrCreateSessionToken();
-  const others = teammates.filter(t => t.playerId !== token);
-  if (others.length > 0) {
-    const names = others.map(t => t.name).join(', ');
-    setText('action-description', `Vos complices : ${names}. Choisissez une victime.`);
+function onMJCupidonSelect(playerId) {
+  if (mjSelected.includes(playerId)) {
+    mjSelected = mjSelected.filter(id => id !== playerId);
+  } else if (mjSelected.length < 2) {
+    mjSelected.push(playerId);
   }
-});
+  highlightSelected('mj-selection-grid', mjSelected);
+  setText('mj-cupidon-count', `${mjSelected.length}/2`);
+  const btn = document.getElementById('mj-confirm-night-btn');
+  btn.disabled = mjSelected.length !== 2;
+  if (mjSelected.length === 2) {
+    btn.onclick = () => {
+      socket.emit('mjNightAction', {
+        roomId, step: 'cupidon',
+        action: { player1Id: mjSelected[0], player2Id: mjSelected[1] }
+      });
+      btn.disabled = true;
+      btn.textContent = 'Couple désigné…';
+    };
+  }
+}
 
-// ── Sorcière ──────────────────────────────────────────────────────────────────
+// ── MJ : Sorcière ─────────────────────────────────────────────────────────────
 
 socket.on('sorciereInfo', ({ victimName, victimId, potions }) => {
-  witchState = { victimId, victimName, potions, killTarget: null };
+  if (!isMJ) return;
 
-  const healSection = document.getElementById('witch-heal-section');
-  const killSection = document.getElementById('witch-kill-section');
-  const healBtn     = document.getElementById('witch-heal-btn');
-  const confirmBtn  = document.getElementById('confirm-action-btn');
+  witchState = { victimId, potions, killTarget: null };
 
-  confirmBtn.style.display = 'none';
+  const healSection = document.getElementById('mj-heal-section');
+  const killSection = document.getElementById('mj-kill-section');
+  const healBtn     = document.getElementById('mj-heal-btn');
 
-  // Victime loups
   if (victimName) {
-    setText('witch-victim-info', `☠ Les loups ciblent : ${victimName}`);
+    setText('mj-wolf-victim', `☠ Les loups ciblent : ${victimName}`);
     healSection.style.display = potions.heal ? 'block' : 'none';
     if (!potions.heal) {
-      setText('witch-victim-info', `☠ Les loups ciblent : ${victimName} (potion de Vie épuisée)`);
+      setText('mj-wolf-victim', `☠ Les loups ciblent : ${victimName} (potion de Vie épuisée)`);
     }
   } else {
-    setText('witch-victim-info', 'Les loups n\'ont pas désigné de victime.');
+    setText('mj-wolf-victim', 'Les loups n\'ont pas désigné de victime.');
     healSection.style.display = 'none';
   }
 
-  // Potion de mort
   if (potions.kill) {
-    renderPlayerGrid('witch-kill-grid', getAlivePlayers(), (pid) => {
+    const alive = players.filter(p => p.isAlive && !p.isMJ);
+    renderPlayerGrid('mj-kill-grid', alive, (pid) => {
       witchState.killTarget = pid;
-      highlightSelected('witch-kill-grid', [pid]);
-      confirmBtn.style.display = 'block';
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = 'Utiliser la potion de Mort ☠';
+      highlightSelected('mj-kill-grid', [pid]);
     });
     killSection.style.display = 'block';
   } else {
@@ -337,26 +295,38 @@ socket.on('sorciereInfo', ({ victimName, victimId, potions }) => {
   }
 
   healBtn.onclick = () => {
-    socket.emit('nightAction', { roomId, step: 'sorciere', action: { type: 'heal' } });
-    showScreen('waiting-screen');
-    setText('waiting-text', 'Potion de Vie utilisée ✓');
+    socket.emit('mjNightAction', { roomId, step: 'sorciere', action: { type: 'heal' } });
+    healBtn.disabled = true;
+    setText('mj-wolf-victim', `💊 Victime sauvée.`);
+    healSection.style.display = 'none';
   };
 
-  document.getElementById('witch-skip-btn').onclick = () => {
-    socket.emit('nightAction', { roomId, step: 'sorciere', action: { type: 'skip' } });
-    showScreen('waiting-screen');
-    setText('waiting-text', 'Vous passez votre tour.');
+  document.getElementById('mj-sorciere-skip-btn').onclick = () => {
+    socket.emit('mjNightAction', { roomId, step: 'sorciere', action: { type: 'skip' } });
   };
 
-  confirmBtn.onclick = () => {
-    if (!witchState.killTarget) return;
-    socket.emit('nightAction', {
-      roomId, step: 'sorciere',
-      action: { type: 'kill', targetId: witchState.killTarget }
-    });
-    showScreen('waiting-screen');
-    setText('waiting-text', 'Potion de Mort utilisée ☠');
-  };
+  // Le bouton "Utiliser la potion de mort" apparaît quand une cible est sélectionnée
+  // On l'ajoute dynamiquement après la grille si kill
+  if (potions.kill) {
+    let killConfirmBtn = document.getElementById('mj-kill-confirm-btn');
+    if (!killConfirmBtn) {
+      killConfirmBtn = document.createElement('button');
+      killConfirmBtn.id = 'mj-kill-confirm-btn';
+      killConfirmBtn.className = 'btn btn-secondary';
+      killConfirmBtn.style.marginTop = '10px';
+      killConfirmBtn.textContent = '☠ Utiliser la Potion de Mort';
+      document.getElementById('mj-kill-section').appendChild(killConfirmBtn);
+    }
+    killConfirmBtn.style.display = 'block';
+    killConfirmBtn.onclick = () => {
+      if (!witchState.killTarget) return;
+      socket.emit('mjNightAction', {
+        roomId, step: 'sorciere',
+        action: { type: 'kill', targetId: witchState.killTarget }
+      });
+      killConfirmBtn.disabled = true;
+    };
+  }
 });
 
 // ── Fin de nuit ───────────────────────────────────────────────────────────────
@@ -365,6 +335,11 @@ socket.on('nightEnd', ({ deaths, players: p, waitingForChasseur }) => {
   if (p) players = p;
   setPhaseTitle('🌅 Réveil du village');
   setPhaseDesc('');
+
+  if (isMJ) {
+    hide('mj-night-controls');
+    updateMJPlayersList();
+  }
 
   const list = document.getElementById('death-list');
   list.innerHTML = '';
@@ -383,95 +358,82 @@ socket.on('nightEnd', ({ deaths, players: p, waitingForChasseur }) => {
   }
 
   setText('death-continue', waitingForChasseur
-    ? 'Le Chasseur doit désigner sa cible…'
+    ? 'Le MJ va gérer le tir du Chasseur…'
     : 'La phase de jour va commencer dans quelques secondes.');
   showScreen('death-screen');
-
-  if (isMJ) updateMJPlayersList();
 });
 
 // ── Phase Jour ────────────────────────────────────────────────────────────────
 
 socket.on('dayStarted', ({ turn, players: p }) => {
   players = p;
-  hasVoted = false;
-  voteOpen = false;
-
   setPhaseTitle(`☀️ Jour ${turn}`);
-  setPhaseDesc('Débat en cours.');
+  setPhaseDesc('Discussion en cours.');
   showScreen('waiting-screen');
-  setText('waiting-text', 'Discutez ensemble. Le MJ va bientôt ouvrir le vote.');
+  setText('waiting-text', 'Discutez ensemble. Le MJ va bientôt désigner l\'éliminé.');
 
   if (isMJ) {
     hide('mj-night-controls');
-    show('mj-day-controls');
-    show('mj-vote-btn');
-    hide('mj-close-vote-btn');
     updateMJPlayersList();
+    showMJDayControls();
   }
 });
 
-// ── Vote ──────────────────────────────────────────────────────────────────────
-
-socket.on('voteStarted', ({ players: p, aliveCount }) => {
+// Reçu si le MJ était déconnecté et se reconnecte en cours de jour
+socket.on('mjDayControl', ({ players: p }) => {
+  if (!isMJ) return;
   players = p;
-  voteOpen = true;
-  hasVoted = false;
-  setText('vote-total', aliveCount);
-  setText('vote-current', '0');
-  document.getElementById('my-vote-status').style.display = 'none';
-  showDayVote();
-
-  if (isMJ) {
-    hide('mj-vote-btn');
-    show('mj-close-vote-btn');
-  }
+  updateMJPlayersList();
+  showMJDayControls();
 });
 
-function showDayVote() {
-  setPhaseTitle('🗳 Vote du village');
+function showMJDayControls() {
+  hide('mj-night-controls');
+  hide('mj-chasseur-controls');
+  show('mj-day-controls');
+
   const alive = players.filter(p => p.isAlive && !p.isMJ);
-  renderPlayerGrid('vote-grid', alive, (playerId) => {
-    if (hasVoted) return;
-    socket.emit('submitVote', { roomId, targetId: playerId });
-    hasVoted = true;
-    document.getElementById('my-vote-status').style.display = 'block';
-    highlightSelected('vote-grid', [playerId]);
+  renderPlayerGrid('mj-vote-grid', alive, (playerId) => {
+    socket.emit('mjEliminatePlayer', { roomId, targetId: playerId });
+    // Désactiver la grille après sélection
+    document.querySelectorAll('#mj-vote-grid .player-card').forEach(c => {
+      c.style.pointerEvents = 'none';
+    });
+    document.getElementById('mj-no-elim-btn').disabled = true;
   });
-  showScreen('day-vote');
 }
 
-socket.on('voteUpdate', ({ voteCount, aliveCount }) => {
-  setText('vote-current', voteCount);
-  setText('vote-total', aliveCount);
+document.getElementById('mj-no-elim-btn').addEventListener('click', () => {
+  socket.emit('mjEliminatePlayer', { roomId, targetId: 'none' });
+  document.getElementById('mj-no-elim-btn').disabled = true;
+  document.querySelectorAll('#mj-vote-grid .player-card').forEach(c => {
+    c.style.pointerEvents = 'none';
+  });
 });
 
 // ── Élimination ───────────────────────────────────────────────────────────────
 
 socket.on('playerEliminated', ({ name, role, players: p, waitingForChasseur }) => {
   if (p) players = p;
-  voteOpen = false;
 
   const info = ROLES[role] || { icon: '❓', name: role };
   setText('death-title', 'Joueur éliminé');
   document.getElementById('death-list').innerHTML =
     `<p>${info.icon} <strong>${name}</strong> était <em>${info.name}</em></p>`;
   setText('death-continue', waitingForChasseur
-    ? 'Le Chasseur doit désigner sa cible…'
+    ? 'Le MJ va gérer le tir du Chasseur…'
     : 'La nuit va commencer dans quelques secondes.');
   showScreen('death-screen');
 
   if (isMJ) {
-    hide('mj-close-vote-btn');
-    hide('mj-vote-btn');
     hide('mj-day-controls');
+    hide('mj-night-controls');
     updateMJPlayersList();
   }
 });
 
 socket.on('noElimination', ({ players: p }) => {
   if (p) players = p;
-  voteOpen = false;
 
   setText('death-title', 'Résultat du vote');
   document.getElementById('death-list').innerHTML =
@@ -480,30 +442,40 @@ socket.on('noElimination', ({ players: p }) => {
   showScreen('death-screen');
 
   if (isMJ) {
-    hide('mj-close-vote-btn');
-    hide('mj-vote-btn');
     hide('mj-day-controls');
+    updateMJPlayersList();
   }
 });
 
-// ── Chasseur ──────────────────────────────────────────────────────────────────
+// ── Chasseur (géré par le MJ) ─────────────────────────────────────────────────
 
 socket.on('chasseurAlert', ({ message }) => {
-  setText('chasseur-msg', message);
-  renderPlayerGrid('chasseur-grid', players.filter(p => p.isAlive && !p.isMJ), (playerId) => {
-    socket.emit('chasseurShot', { roomId, targetId: playerId });
-    showScreen('waiting-screen');
-    setText('waiting-text', 'Tir effectué. En attente…');
+  if (!isMJ) return;
+
+  setText('mj-chasseur-msg', message);
+
+  hide('mj-night-controls');
+  hide('mj-day-controls');
+  show('mj-chasseur-controls');
+
+  const alive = players.filter(p => p.isAlive && !p.isMJ);
+  renderPlayerGrid('mj-chasseur-grid', alive, (playerId) => {
+    socket.emit('mjChasseurShot', { roomId, targetId: playerId });
+    document.querySelectorAll('#mj-chasseur-grid .player-card').forEach(c => {
+      c.style.pointerEvents = 'none';
+    });
   });
-  showScreen('chasseur-screen');
-  setPhaseTitle('🏹 Tir du Chasseur');
 });
 
 socket.on('chasseurShot', ({ name, role, players: p }) => {
   if (p) players = p;
   const info = ROLES[role] || { icon: '❓', name: role };
   showNotif(`${info.icon} ${name} (${info.name}) abattu par le Chasseur`, 'warning');
-  if (isMJ) updateMJPlayersList();
+
+  if (isMJ) {
+    hide('mj-chasseur-controls');
+    updateMJPlayersList();
+  }
 });
 
 // ── Reconnexion joueurs ───────────────────────────────────────────────────────
@@ -550,6 +522,7 @@ socket.on('gameEnd', ({ winner, winners, allPlayers }) => {
     rolesDiv.appendChild(row);
   });
 
+  if (isMJ) hide('mj-dashboard');
   showScreen('game-end-screen');
   setPhaseTitle('🏆 Fin de partie');
   clearRoomContext();
@@ -559,7 +532,7 @@ socket.on('gameEnd', ({ winner, winners, allPlayers }) => {
 
 socket.on('mjUpdate', ({ players: p }) => {
   players = p;
-  updateMJPlayersList();
+  if (isMJ) updateMJPlayersList();
 });
 
 function showMJDashboard() {
@@ -583,29 +556,18 @@ function updateMJPlayersList() {
   });
 }
 
-document.getElementById('mj-next-btn').addEventListener('click', () => {
-  socket.emit('mjForceNextStep', { roomId });
-});
-
-document.getElementById('mj-vote-btn').addEventListener('click', () => {
-  socket.emit('startVote', { roomId });
-});
-
-document.getElementById('mj-close-vote-btn').addEventListener('click', () => {
-  socket.emit('closeVote', { roomId });
-  hide('mj-close-vote-btn');
+// Le MJ peut forcer l'avance de l'étape en cas de blocage
+document.addEventListener('keydown', (e) => {
+  if (!isMJ) return;
+  if (e.key === 'F9') socket.emit('mjForceNextStep', { roomId });
 });
 
 // ── Helpers joueurs ───────────────────────────────────────────────────────────
 
-function getAlivePlayers(excludeSelf = false) {
-  const token = getOrCreateSessionToken();
-  return players.filter(p => p.isAlive && !p.isMJ && (!excludeSelf || p.playerId !== token));
-}
-
-function getAliveNotWolves() {
-  // Les loups ne peuvent voter que pour des non-loups (règle classique), jamais le MJ
-  return players.filter(p => p.isAlive && !p.isMJ && p.role !== 'loup');
+function highlightSelected(containerId, ids) {
+  document.querySelectorAll(`#${containerId} .player-card`).forEach(card => {
+    card.classList.toggle('selected', ids.includes(card.dataset.id));
+  });
 }
 
 // ── Rendu grille joueurs ──────────────────────────────────────────────────────
@@ -630,8 +592,8 @@ function renderPlayerGrid(containerId, list, onSelect) {
 // ── Utilitaires UI ────────────────────────────────────────────────────────────
 
 const SCREENS = [
-  'role-reveal', 'lovers-reveal', 'night-action', 'day-vote',
-  'waiting-screen', 'death-screen', 'chasseur-screen', 'game-end-screen'
+  'role-reveal', 'lovers-reveal', 'voyant-screen',
+  'waiting-screen', 'death-screen', 'game-end-screen'
 ];
 
 function showScreen(id) {
@@ -647,12 +609,6 @@ function hide(id) { const el = document.getElementById(id); if (el) el.style.dis
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
-}
-
-function highlightSelected(containerId, ids) {
-  document.querySelectorAll(`#${containerId} .player-card`).forEach(card => {
-    card.classList.toggle('selected', ids.includes(card.dataset.id));
-  });
 }
 
 function setPhaseTitle(t) { setText('phase-title', t); }
